@@ -1,0 +1,16 @@
+node_modules
+.next
+.data*
+.git
+.env
+.env.*
+!.env.example
+work
+backups
+*.tgz
+*.tar
+**/*.sqlite
+**/*.sqlite-wal
+**/*.sqlite-shm
+*.log
+Casa em Dia - demonstracao.html

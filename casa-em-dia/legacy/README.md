@@ -1,0 +1,1 @@
+Interface original preservada apenas como referência. A aplicação atual está em app/ e components/. Estes arquivos não são servidos pelo Next.js. A demonstração HTML na raiz também corresponde à versão original.

@@ -1,0 +1,27 @@
+{
+  "name": "casa-em-dia",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agenda compartilhada da república com React, Next.js e SQLite.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "dev": "node server.mjs --dev",
+    "build": "next build",
+    "test:ui": "node test/ui-smoke.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "^1.57.0",
+    "next": "^16.4.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.1"
+  }
+}
