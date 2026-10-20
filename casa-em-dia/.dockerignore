@@ -5,6 +5,13 @@ node_modules
 .env
 .env.*
 !.env.example
+.dev.vars
+.dev.vars.*
+.wrangler
+out
+cloudflare-backups
+*.snapshot.json
+*.snapshot.json.gz
 work
 backups
 *.tgz

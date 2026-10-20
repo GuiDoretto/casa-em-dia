@@ -1,0 +1,49 @@
+name: Verificar aplicação
+
+on:
+  push:
+    paths:
+      - 'casa-em-dia/**'
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - 'casa-em-dia/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: casa-em-dia
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      CI: 'true'
+    steps:
+      - name: Obter código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Preparar Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: casa-em-dia/package-lock.json
+      - name: Instalar dependências fixadas
+        run: npm ci
+      - name: Verificar regras e backend
+        run: npm test
+      - name: Compilar site e validar pacote Cloudflare
+        run: npm run build:cloudflare
+      - name: Verificar API e banco no runtime Cloudflare local
+        run: npm run test:cloudflare

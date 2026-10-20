@@ -1,6 +1,8 @@
 # Casa em Dia
 
-Uma agenda compartilhada para dividir a limpeza da república: moradores, atividades recorrentes, sorteios equilibrados, calendário, trocas e ranking. Interface em **React e Next.js**, com servidor Node.js e **SQLite no próprio computador ou servidor**. Código aberto com licença MIT.
+Uma agenda compartilhada para dividir a limpeza da república: moradores, atividades recorrentes, sorteios equilibrados, calendário, trocas e ranking. A interface usa **React e Next.js**, com duas opções de execução: **Node.js com SQLite local** ou **Cloudflare Workers com SQLite em Durable Object**. O mesmo núcleo mantém as regras, a autenticação e as transações nos dois ambientes. Código aberto com licença MIT.
+
+A instalação online desta casa fica em **[casa-em-dia.casa-em-dia.workers.dev](https://casa-em-dia.casa-em-dia.workers.dev)**, com HTTPS e banco persistente na Cloudflare. Para usá-la, os moradores acessam esse endereço; o computador local pode ficar desligado. A preparação, publicação, manutenção e os backups estão no **[guia Cloudflare](docs/CLOUDFLARE.md)**.
 
 ## Começar no seu computador
 
@@ -93,17 +95,17 @@ Na mesma rede Wi-Fi, compartilhe o endereço **Na mesma rede Wi-Fi** mostrado no
 
 O computador deve permanecer ligado. Celular e computador precisam estar na mesma rede, sem isolamento entre clientes; permita o Node.js no firewall da rede privada se solicitado. Abra a agenda pelo endereço da rede antes de copiar convites: `localhost` no link aponta para o aparelho de quem o abre.
 
-Para acesso pela internet, siga o **[guia passo a passo de publicação](docs/PUBLICAR.md)**. O projeto inclui `Dockerfile`, `compose.yaml` e Caddy para usar **HTTPS e banco persistente em um servidor**. A entrega não publica o aplicativo nem contrata hospedagem automaticamente.
+Para hospedar na Cloudflare Free com endereço `workers.dev`, siga o **[guia Cloudflare](docs/CLOUDFLARE.md)**. A instalação online funciona independentemente do computador local. Como alternativa, o **[guia de servidor próprio](docs/PUBLICAR.md)** usa `Dockerfile`, `compose.yaml` e Caddy para fornecer HTTPS e banco persistente em um servidor Node.js.
 
 ## Banco local, banco no servidor e cópias de segurança
 
-O SQLite cria o arquivo **`.data/casa.sqlite`** automaticamente. Não exige instalar um serviço de banco de dados ou contratar um banco externo. Atualizar a interface para React/Next.js preserva esse formato: mantenha sua pasta `.data` ao atualizar o código.
+Na instalação Node.js, o SQLite cria o arquivo **`.data/casa.sqlite`** automaticamente. Não exige instalar um serviço de banco de dados ou contratar um banco externo. Mantenha sua pasta `.data` ao atualizar o código. Na Cloudflare, os registros ficam no SQLite gerenciado do Durable Object; o arquivo local não é o banco da instalação online.
 
-O banco do seu computador e o banco da hospedagem são **independentes**. Não há sincronização automática entre eles. Para todos usarem a mesma agenda, acessem o endereço do servidor. Para levar os dados locais à hospedagem, pare o servidor local e siga a seção de migração do guia.
+O banco do seu computador e o banco da hospedagem são **independentes**. Não há sincronização automática entre eles. Para todos usarem a mesma agenda, acessem o mesmo endereço online. A casa atual já foi importada e conferida na Cloudflare. Para migrar outra instalação, pare o servidor local e siga o procedimento de importação do guia de hospedagem escolhido.
 
 Para um backup local completo, pare com **Ctrl+C** e copie a pasta `.data` inteira para um lugar privado. Para restaurar, pare o servidor, guarde uma cópia do banco atual e substitua a pasta `.data` pela cópia desejada. Não copie somente o `casa.sqlite` enquanto o app estiver ligado: o SQLite também pode usar arquivos auxiliares de transações.
 
-As cópias contêm contatos, senhas derivadas e sessões. Não coloque `.data`, backups ou convites em um repositório público. A exportação JSON disponível ao admin inclui também os calendários arquivados, com suas atividades, pontos e trocas. Serve para consulta e portabilidade; não contém senhas nem convites e não há importador JSON nesta versão.
+As cópias contêm contatos, senhas derivadas e sessões. Mantenha `.data`, backups e convites fora do Git. A exportação JSON disponível na interface do admin inclui os calendários arquivados, com suas atividades, pontos e trocas. Serve para consulta e portabilidade; não contém senhas nem convites e não tem importador na interface. Para o backup completo da Cloudflare, use o snapshot operacional das 13 tabelas descrito no **[guia Cloudflare](docs/CLOUDFLARE.md)**; ele inclui também autenticação, configurações e fotos.
 
 ### Fotos dos moradores
 
@@ -152,13 +154,19 @@ Fechar esse terminal remove a variável da sessão, sem apagar o banco de testes
 | `app/` | Rotas e estrutura do Next.js App Router. |
 | `components/` | Interface React e componentes da agenda. |
 | `public/` | Arquivos estáticos, como ícones. |
-| `server.mjs` | Servidor HTTP, API, autenticação e SQLite. |
+| `server.mjs` | Entrada Node.js: servidor HTTP, Next.js, ambiente e abertura do SQLite local. |
+| `application.mjs` | Núcleo compartilhado: API, autenticação, esquema SQLite e regras da casa. |
+| `cloudflare/worker.mjs` | Entrada Cloudflare: assets, API, Durable Object e rotinas programadas. |
+| `cloudflare/sqlite-adapter.mjs` | Adaptador de consultas e transações do SQLite gerenciado. |
+| `cloudflare/data-transfer.mjs` | Validação, exportação e importação integral do banco. |
+| `scripts/cloudflare-data.mjs` | Backup local e operações protegidas de migração e backup online. |
 | `notifications.mjs` | Preferências, agendamento e envio de Web Push, e-mail e SMS. |
-| ules.mjs | Datas, folgas e pontuação. |
-| scheduling.mjs | Dias das atividades e limites dos sorteios. |
-| profile-photos.mjs | Validação e armazenamento das fotos no SQLite. |
+| `rules.mjs` | Datas, folgas e pontuação. |
+| `scheduling.mjs` | Dias das atividades e limites dos sorteios. |
+| `profile-photos.mjs` | Validação e armazenamento das fotos no SQLite. |
 | `test/` | Testes das regras e operações do servidor. |
-| `docs/PUBLICAR.md` | Publicação, migração, backup e atualização. |
+| `docs/PUBLICAR.md` | Publicação, migração, backup e atualização em servidor Node.js. |
+| `docs/CLOUDFLARE.md` | Cloudflare Free, importação, backup online e publicação pelo GitHub. |
 
 Para verificar as regras e a API, execute `npm test`. Para validar a compilação da interface, execute `npm run build`.
 

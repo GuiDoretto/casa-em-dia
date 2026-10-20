@@ -54,7 +54,7 @@ export function createNotifications({ db, settings, now = localNow, env = proces
     let stopped = false, inflight = null;
     const running = new Set();
     function status(userId) {
-        return { email: { configured: emailConfigured(), provider: 'Brevo' }, sms: { configured: smsConfigured(), provider: 'Brevo' }, push: { configured: true, publicKey: vapid.publicKey }, preferences: preferences(userId), subscriptionCount: Number(one('SELECT count(*) AS n FROM notification_subscriptions WHERE user_id=?', userId).n), recent: all('SELECT channel,status,created_at,error FROM notification_deliveries WHERE user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 12', userId).map(row => ({ channel: row.channel, status: row.status, createdAt: new Date(row.created_at).toISOString(), error: row.error })) };
+        return { email: { configured: emailConfigured(), provider: 'Brevo' }, sms: { configured: smsConfigured(), provider: 'Brevo' }, push: { configured: true, publicKey: vapid.publicKey }, preferences: preferences(userId), subscriptionCount: Number(one('SELECT count(*) AS n FROM notification_subscriptions WHERE user_id=?', userId).n), recent: all('SELECT channel,status,created_at,error FROM notification_deliveries WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 12', userId).map(row => ({ channel: row.channel, status: row.status, createdAt: new Date(row.created_at).toISOString(), error: row.error })) };
     }
     function savePreferences(userId, value) {
         if (!active(userId)) fail('Morador indisponível.', 403);

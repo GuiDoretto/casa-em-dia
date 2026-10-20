@@ -10,3 +10,9 @@ out/
 *.tsbuildinfo
 *.tgz
 backups/
+.wrangler/
+.dev.vars
+.dev.vars.*
+cloudflare-backups/
+*.snapshot.json
+*.snapshot.json.gz

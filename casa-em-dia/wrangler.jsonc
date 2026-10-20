@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "casa-em-dia",
+  "main": "cloudflare/worker.mjs",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./out",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "CASA", "class_name": "CasaDatabase" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["CasaDatabase"] }
+  ],
+  "vars": {
+    "CASA_SCHEDULE_ENABLED": "1",
+    "CASA_MIGRATION_ENABLED": "0",
+    "CASA_SMS_ENABLED": "0",
+    "BREVO_FROM_NAME": "Casa em Dia"
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
+  }
+}
