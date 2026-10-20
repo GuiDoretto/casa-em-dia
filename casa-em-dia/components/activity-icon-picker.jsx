@@ -11,10 +11,10 @@ export default function ActivityIconPicker({ activity }) {
     <p className="hint">Escolha o símbolo que combina com esse cuidado.</p>
     <div className="activity-icon-options">{ACTIVITY_ICONS.map(icon =>
       <label className="activity-icon-option" key={icon.id}>
-        <input className="sr-only" type="radio" name="icon" value={icon.id} checked={selected === icon.id} onChange={() => setSelected(icon.id)}/>
-        <span className="activity-icon-tile"><Icon name={icon.id} size={24}/><span>{icon.label}</span></span>
+        <input className="sr-only" type="radio" name="icon" value={icon.id} checked={selected === icon.id} onChange={() => setSelected(icon.id)} />
+        <span className="activity-icon-tile"><Icon name={icon.id} size={24} /><span>{icon.label}</span></span>
       </label>
     )}</div>
-    <p className="activity-icon-preview" aria-live="polite"><Icon name={selected} size={18}/><span>Ícone escolhido: <strong>{option.label}</strong></span></p>
+    <p className="activity-icon-preview" aria-live="polite"><Icon name={selected} size={18} /><span>Ícone escolhido: <strong>{option.label}</strong></span></p>
   </fieldset>;
 }

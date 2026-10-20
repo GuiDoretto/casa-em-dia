@@ -109,7 +109,7 @@ export default function HouseholdApp() {
     try {
       if (userId) window.localStorage.setItem(PUSH_OWNER_KEY, userId);
       else window.localStorage.removeItem(PUSH_OWNER_KEY);
-    } catch {}
+    } catch { }
   }
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
@@ -211,7 +211,7 @@ export default function HouseholdApp() {
       saved = true; savePushOwner(userId); setPushEnabled(true);
       notify('Avisos ativados neste aparelho, inclusive com a agenda fechada.');
     } catch (error) {
-      if (created && !saved) { try { await subscription?.unsubscribe(); } catch {} }
+      if (created && !saved) { try { await subscription?.unsubscribe(); } catch { } }
       notify(error.message || 'Não foi possível ativar os avisos neste aparelho.');
     } finally { pushBusyRef.current = false; setPushBusy(false); }
   }
@@ -274,28 +274,28 @@ export default function HouseholdApp() {
   const currentView = !isAdmin && ['admin', 'draw'].includes(view) ? 'home' : view;
   const menu = navigation.filter(([id]) => isAdmin || !['admin', 'draw'].includes(id));
   return <HouseContext.Provider value={context}>
-    {!state ? <AuthScreen onAuthenticated={fresh => { setState(fresh); window.history.replaceState(null, '', window.location.pathname + window.location.hash); }} notify={notify}/> :
+    {!state ? <AuthScreen onAuthenticated={fresh => { setState(fresh); window.history.replaceState(null, '', window.location.pathname + window.location.hash); }} notify={notify} /> :
       <div className="app-shell">
         <a className="skip-link" href="#main">Pular para o conteúdo</a>
         <aside className="sidebar">
-          <Brand/>
-          <div className="house-switch"><span className="house-symbol"><Icon name="home" size={18}/></span><div><strong>{state.settings.houseName}</strong><small>Nosso espaço compartilhado</small></div><span className="online-dot" title="Agenda da casa"/></div>
+          <Brand />
+          <div className="house-switch"><span className="house-symbol"><Icon name="home" size={18} /></span><div><strong>{state.settings.houseName}</strong><small>Nosso espaço compartilhado</small></div><span className="online-dot" title="Agenda da casa" /></div>
           <p className="nav-label">NOSSA ROTINA</p>
-          <nav aria-label="Menu principal">{menu.map(([id, icon, title]) => <button key={id} onClick={() => navigate(id)} className={'nav-item ' + (currentView === id ? 'active' : '')} aria-current={currentView === id ? 'page' : undefined}><Icon name={icon} size={19}/><span>{title}</span>{id === 'swaps' && swapCount > 0 && <b className="nav-count">{swapCount}</b>}</button>)}</nav>
-          <div className="sidebar-bottom"><div className="care-note"><Icon name="leaf" size={21}/><p>Casa boa é casa<br/><strong>cuidada em conjunto.</strong></p></div><button className="profile-button" onClick={() => setModal({ type: 'profile' })}><Avatar user={state.user}/><span><strong>{state.user.name}</strong><small>{isAdmin ? 'Admin da casa' : 'Morador'}</small></span><Icon name="chevron" size={16}/></button></div>
+          <nav aria-label="Menu principal">{menu.map(([id, icon, title]) => <button key={id} onClick={() => navigate(id)} className={'nav-item ' + (currentView === id ? 'active' : '')} aria-current={currentView === id ? 'page' : undefined}><Icon name={icon} size={19} /><span>{title}</span>{id === 'swaps' && swapCount > 0 && <b className="nav-count">{swapCount}</b>}</button>)}</nav>
+          <div className="sidebar-bottom"><div className="care-note"><Icon name="leaf" size={21} /><p>Casa boa é casa<br /><strong>cuidada em conjunto.</strong></p></div><button className="profile-button" onClick={() => setModal({ type: 'profile' })}><Avatar user={state.user} /><span><strong>{state.user.name}</strong><small>{isAdmin ? 'Admin da casa' : 'Morador'}</small></span><Icon name="chevron" size={16} /></button></div>
         </aside>
         <div className="workspace">
-          <header className="topbar"><div className="desktop-breadcrumb">Nossa casa <Icon name="chevron" size={14}/><strong>{navigation.find(([id]) => id === currentView)?.[2]}</strong></div><div className="mobile-brand"><Brand/></div><div className="topbar-actions"><span className="topbar-date">{formatDate(now.date, { weekday: 'long', day: 'numeric', month: 'long' })}</span><button className="icon-btn notification-btn" aria-label={'Notificações: ' + pendingMine.length + ' atividades pendentes'} onClick={() => setModal({ type: 'notifications' })}><Icon name="bell"/>{pendingMine.length > 0 && <i/>}</button><button className="avatar-button" aria-label="Abrir meu perfil" onClick={() => setModal({ type: 'profile' })}><Avatar user={state.user}/></button></div></header>
-          {connection && <div className="connection-banner" role="status"><Icon name="clock" size={16}/>{connection}</div>}
+          <header className="topbar"><div className="desktop-breadcrumb">Nossa casa <Icon name="chevron" size={14} /><strong>{navigation.find(([id]) => id === currentView)?.[2]}</strong></div><div className="mobile-brand"><Brand /></div><div className="topbar-actions"><span className="topbar-date">{formatDate(now.date, { weekday: 'long', day: 'numeric', month: 'long' })}</span><button className="icon-btn notification-btn" aria-label={'Notificações: ' + pendingMine.length + ' atividades pendentes'} onClick={() => setModal({ type: 'notifications' })}><Icon name="bell" />{pendingMine.length > 0 && <i />}</button><button className="avatar-button" aria-label="Abrir meu perfil" onClick={() => setModal({ type: 'profile' })}><Avatar user={state.user} /></button></div></header>
+          {connection && <div className="connection-banner" role="status"><Icon name="clock" size={16} />{connection}</div>}
           <main id="main" className="main">
-            <div className="page-heading"><div><p className="eyebrow">{currentView === 'home' ? 'BEM-VINDO À NOSSA ROTINA' : 'CUIDAR É COMPARTILHAR'}</p><h1>{titles[currentView][0]}</h1><p>{titles[currentView][1]}</p></div>{isAdmin && ['home', 'calendar'].includes(currentView) && <button className="btn" onClick={() => setModal({ type: 'task' })}><Icon name="plus" size={17}/><span>Nova atividade</span></button>}</div>
-            {currentView === 'home' && <Dashboard/>}{currentView === 'calendar' && <Calendar/>}{currentView === 'draw' && <Draw/>}{currentView === 'swaps' && <Swaps/>}{currentView === 'people' && <Residents/>}{currentView === 'ranking' && <Ranking/>}{currentView === 'admin' && <Admin/>}
-            <footer className="main-footer"><span><Icon name="leaf" size={14}/>Feito para dividir tarefas. E somar cuidado.</span><span>Casa em Dia · A casa é de todos.</span></footer>
+            <div className="page-heading"><div><p className="eyebrow">{currentView === 'home' ? 'BEM-VINDO À NOSSA ROTINA' : 'CUIDAR É COMPARTILHAR'}</p><h1>{titles[currentView][0]}</h1><p>{titles[currentView][1]}</p></div>{isAdmin && ['home', 'calendar'].includes(currentView) && <button className="btn" onClick={() => setModal({ type: 'task' })}><Icon name="plus" size={17} /><span>Nova atividade</span></button>}</div>
+            {currentView === 'home' && <Dashboard />}{currentView === 'calendar' && <Calendar />}{currentView === 'draw' && <Draw />}{currentView === 'swaps' && <Swaps />}{currentView === 'people' && <Residents />}{currentView === 'ranking' && <Ranking />}{currentView === 'admin' && <Admin />}
+            <footer className="main-footer"><span><Icon name="leaf" size={14} />Feito para dividir tarefas. E somar cuidado.</span><span>Casa em Dia · A casa é de todos.</span></footer>
           </main>
         </div>
-        <nav className="mobile-nav" aria-label="Menu para celular">{menu.map(([id, icon, title]) => <button key={id} onClick={() => navigate(id)} className={currentView === id ? 'active' : ''} aria-current={currentView === id ? 'page' : undefined}><Icon name={icon} size={21}/><span>{id === 'admin' ? 'Admin' : title}</span>{id === 'swaps' && swapCount > 0 && <b>{swapCount}</b>}</button>)}</nav>
-        {modal && <Dialogs key={modal.type + (modal.task?.id || modal.template?.id || modal.user?.id || '')} modal={modal}/>}
+        <nav className="mobile-nav" aria-label="Menu para celular">{menu.map(([id, icon, title]) => <button key={id} onClick={() => navigate(id)} className={currentView === id ? 'active' : ''} aria-current={currentView === id ? 'page' : undefined}><Icon name={icon} size={21} /><span>{id === 'admin' ? 'Admin' : title}</span>{id === 'swaps' && swapCount > 0 && <b>{swapCount}</b>}</button>)}</nav>
+        {modal && <Dialogs key={modal.type + (modal.task?.id || modal.template?.id || modal.user?.id || '')} modal={modal} />}
       </div>}
-    {toast && <div className="toast" role="status" aria-live="polite"><Icon name="info" size={18}/>{toast}<button aria-label="Fechar aviso" onClick={() => setToast('')}><Icon name="close" size={16}/></button></div>}
+    {toast && <div className="toast" role="status" aria-live="polite"><Icon name="info" size={18} />{toast}<button aria-label="Fechar aviso" onClick={() => setToast('')}><Icon name="close" size={16} /></button></div>}
   </HouseContext.Provider>;
 }

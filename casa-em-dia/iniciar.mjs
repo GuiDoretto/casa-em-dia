@@ -1,7 +1,7 @@
-import {spawn} from 'node:child_process';
-import {existsSync, readFileSync} from 'node:fs';
-import {dirname, resolve} from 'node:path';
-import {fileURLToPath} from 'node:url';
+import { spawn } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const root = dirname(fileURLToPath(import.meta.url));
 if (Number(process.versions.node.split('.')[0]) < 24) {
@@ -23,7 +23,7 @@ function dependenciesReady() {
     const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
     const lockPath = resolve(root, 'package-lock.json');
     const lock = existsSync(lockPath) ? JSON.parse(readFileSync(lockPath, 'utf8')) : null;
-    const names = Object.keys({...manifest.dependencies, ...manifest.devDependencies});
+    const names = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies });
     return names.every(name => {
       const installed = JSON.parse(readFileSync(resolve(root, 'node_modules', name, 'package.json'), 'utf8'));
       const locked = lock?.packages?.['node_modules/' + name]?.version;
@@ -39,7 +39,7 @@ function npm(args) {
     // .cmd precisa do cmd.exe no Windows; os argumentos abaixo são fixos.
     const command = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : 'npm';
     const commandArgs = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd ' + args.join(' ')] : args;
-    const child = spawn(command, commandArgs, {cwd: root, env: process.env, stdio: 'inherit', windowsHide: true});
+    const child = spawn(command, commandArgs, { cwd: root, env: process.env, stdio: 'inherit', windowsHide: true });
     activeChild = child;
     child.on('error', rejectRun);
     child.on('exit', code => code === 0 ? resolveRun() : rejectRun(new Error('npm ' + args.join(' ') + ' encerrou sem concluir.')));
@@ -49,7 +49,7 @@ function npm(args) {
 function startServer() {
   const child = spawn(process.execPath, ['server.mjs'], {
     cwd: root,
-    env: {...process.env, NODE_ENV: 'production'},
+    env: { ...process.env, NODE_ENV: 'production' },
     stdio: ['inherit', 'pipe', 'inherit'],
     windowsHide: true,
   });
@@ -73,7 +73,7 @@ function startServer() {
     } else {
       command = 'xdg-open'; args = [url];
     }
-    const browser = spawn(command, args, {stdio: 'ignore', detached: true, windowsHide: true, windowsVerbatimArguments: process.platform === 'win32'});
+    const browser = spawn(command, args, { stdio: 'ignore', detached: true, windowsHide: true, windowsVerbatimArguments: process.platform === 'win32' });
     browser.on('error', () => console.log('Abra no navegador o endereço mostrado acima.'));
     browser.unref();
   }
