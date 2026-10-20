@@ -16,7 +16,7 @@ let server, browser;
 const errors = [];
 async function start() {
   server = spawn(process.execPath, ['server.mjs'], {
-    cwd: root, env: { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '0', CASA_DATA_DIR: dataDir },
+    cwd: root, env: { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '0', CASA_DATA_DIR: dataDir, BREVO_API_KEY: '', BREVO_FROM_EMAIL: '', CASA_SMS_ENABLED: '0', CASA_PUBLIC_URL: '' },
     stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
   });
   return new Promise((yes, no) => {
@@ -47,6 +47,119 @@ try {
   await page.locator('form button[type=submit]').click();
   await page.getByRole('heading', { name: 'Tudo em dia, casa leve.' }).waitFor();
   const nav = title => page.getByRole('navigation', { name: 'Menu principal' }).getByRole('button', { name: title, exact: true }).click();
+
+  const notificationTestState = await (await admin.request.get('/api/state')).json();
+  assert.equal((await admin.request.post('/api/settings', { headers: { Origin: base }, data: { ...notificationTestState.settings, autoGenerate: false } })).status(), 200);
+  // Notification preferences use only this disposable account; no provider is configured.
+  await page.getByRole('button', { name: /^Notificações:/ }).click();
+  let reminders = page.getByRole('dialog');
+  assert.ok(await reminders.locator('input[name=notificationEmailEnabled]').isDisabled());
+  assert.ok(await reminders.locator('input[name=notificationSmsEnabled]').isDisabled());
+  assert.ok(await reminders.getByRole('button', { name: 'Enviar e-mail de teste para mim', exact: true }).isDisabled());
+  assert.ok(await reminders.getByRole('button', { name: 'Enviar SMS de teste para mim', exact: true }).isDisabled());
+  await reminders.locator('input[name=notificationReminderTime]').fill('10:30');
+  await reminders.locator('input[name=notificationPhone]').fill('(11) 99999-1234');
+  const [preferencesResponse] = await Promise.all([
+    page.waitForResponse(response => response.url().endsWith('/api/notification-preferences') && response.request().method() === 'POST'),
+    reminders.getByRole('button', { name: 'Salvar minhas preferências', exact: true }).click(),
+  ]);
+  assert.equal(preferencesResponse.status(), 200);
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'Preferências de lembretes em ' + width);
+    if (width === 390) await page.screenshot({ path: join(artifacts, 'lembretes-390.png'), fullPage: true });
+  }
+  await page.reload();
+  await page.getByRole('heading', { name: 'Tudo em dia, casa leve.' }).waitFor();
+  await page.getByRole('button', { name: /^Notificações:/ }).click();
+  reminders = page.getByRole('dialog');
+  assert.equal(await reminders.locator('input[name=notificationReminderTime]').inputValue(), '10:30');
+  assert.equal(await reminders.locator('input[name=notificationPhone]').inputValue(), '(11) 99999-1234');
+  await reminders.getByRole('button', { name: 'Fechar janela', exact: true }).click();
+  const iphone = await browser.newContext({
+    baseURL: base, storageState: await admin.storageState(), viewport: { width: 390, height: 844 },
+    isMobile: true, hasTouch: true,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+  });
+  const iphonePage = await iphone.newPage();
+  iphonePage.on('pageerror', error => errors.push(error.message));
+  await iphonePage.goto('/');
+  await iphonePage.getByRole('heading', { name: 'Tudo em dia, casa leve.' }).waitFor();
+  await iphonePage.getByRole('button', { name: /^Notificações:/ }).click();
+  const iphoneDialog = iphonePage.getByRole('dialog');
+  assert.ok(await iphoneDialog.getByRole('button', { name: 'Ativar neste aparelho', exact: true }).isDisabled());
+  assert.ok(await iphoneDialog.getByText('No iPhone ou iPad, adicione o app à Tela de Início e abra-o pelo novo ícone para ativar os avisos.', { exact: false }).isVisible());
+  await iphoneDialog.locator('.notification-device').scrollIntoViewIfNeeded();
+  await iphonePage.screenshot({ path: join(artifacts, 'avisos-iphone.png'), fullPage: true });
+  await iphone.close();
+
+  // Simulate browser push APIs. No OS permission or push provider is contacted.
+  const beforePush = await (await admin.request.get('/api/state')).json();
+  assert.equal((await admin.request.post('/api/settings', { headers: { Origin: base }, data: { ...beforePush.settings, autoGenerate: false, paused: true } })).status(), 200);
+  const simulated = await browser.newContext({ baseURL: base, viewport: { width: 390, height: 844 } });
+  assert.equal((await simulated.request.post('/api/login', { headers: { Origin: base }, data: { email: 'ana@exemplo.test', password: 'Senha de teste 2026!' } })).status(), 200);
+  await simulated.addInitScript(({ browserKey }) => {
+    let created = 0, removed = 0;
+    const paddedKey = browserKey.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(browserKey.length / 4) * 4, '=');
+    const oldKey = Uint8Array.from(atob(paddedKey), character => character.charCodeAt(0));
+    const makeSubscription = key => ({
+      endpoint: 'https://fcm.googleapis.com/fcm/send/casa-ui-fake-' + created,
+      options: { applicationServerKey: key },
+      toJSON() { return { endpoint: this.endpoint, keys: { p256dh: browserKey, auth: 'AAAAAAAAAAAAAAAAAAAAAA' } }; },
+      async unsubscribe() { removed++; subscription = null; return true; },
+    });
+    let subscription = makeSubscription(oldKey.buffer);
+    const registration = {
+      active: {}, pushManager: {
+        async getSubscription() { return subscription; },
+        async subscribe(options) { created++; subscription = makeSubscription(options.applicationServerKey); return subscription; },
+      },
+    };
+    const worker = new EventTarget();
+    worker.register = async () => registration;
+    worker.getRegistration = async () => registration;
+    worker.ready = Promise.resolve(registration);
+    Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: worker });
+    Object.defineProperty(Notification, 'permission', { configurable: true, get: () => 'granted' });
+    Object.defineProperty(Notification, 'requestPermission', { configurable: true, value: async () => 'granted' });
+    window.__simulatedPush = { get created() { return created; }, get removed() { return removed; }, expireKey() { subscription.options.applicationServerKey = new Uint8Array(65).buffer; } };
+  }, { browserKey: beforePush.notifications.push.publicKey });
+  const simulatedPage = await simulated.newPage();
+  simulatedPage.on('pageerror', error => errors.push(error.message));
+  await simulatedPage.goto('/');
+  await simulatedPage.getByRole('heading', { name: 'Tudo em dia, casa leve.' }).waitFor();
+  await simulatedPage.getByRole('button', { name: /^Notificações:/ }).click();
+  const simulatedDialog = simulatedPage.getByRole('dialog');
+  await simulatedDialog.getByRole('button', { name: 'Ativar neste aparelho', exact: true }).click();
+  await simulatedDialog.getByRole('button', { name: 'Desativar neste aparelho', exact: true }).waitFor();
+  assert.equal((await (await simulated.request.get('/api/state')).json()).notifications.subscriptionCount, 1);
+  assert.equal(await simulatedPage.evaluate(() => window.__simulatedPush.created), 1);
+  assert.equal(await simulatedPage.evaluate(() => window.__simulatedPush.removed), 1, 'Inscrição que não pertence à conta deve ser revogada localmente');
+  assert.ok(await simulatedDialog.getByRole('button', { name: 'Enviar teste para este aparelho', exact: true }).isEnabled());
+  await simulatedPage.evaluate(() => { window.__simulatedPush.expireKey(); window.dispatchEvent(new Event('focus')); });
+  await simulatedDialog.getByRole('button', { name: 'Ativar neste aparelho', exact: true }).waitFor();
+  await simulatedDialog.getByRole('button', { name: 'Ativar neste aparelho', exact: true }).click();
+  await simulatedDialog.getByRole('button', { name: 'Desativar neste aparelho', exact: true }).waitFor();
+  assert.equal(await simulatedPage.evaluate(() => window.__simulatedPush.created), 2);
+  assert.equal(await simulatedPage.evaluate(() => window.__simulatedPush.removed), 2, 'Inscrição com VAPID antigo deve ser substituída');
+  assert.equal((await (await simulated.request.get('/api/state')).json()).notifications.subscriptionCount, 1);
+  await simulatedDialog.getByRole('button', { name: 'Desativar neste aparelho', exact: true }).click();
+  await simulatedDialog.getByRole('button', { name: 'Ativar neste aparelho', exact: true }).waitFor();
+  assert.equal((await (await simulated.request.get('/api/state')).json()).notifications.subscriptionCount, 0);
+  await simulatedDialog.getByRole('button', { name: 'Ativar neste aparelho', exact: true }).click();
+  await simulatedDialog.getByRole('button', { name: 'Desativar neste aparelho', exact: true }).waitFor();
+  await simulatedDialog.getByRole('button', { name: 'Fechar janela', exact: true }).click();
+  await simulatedPage.getByRole('button', { name: 'Abrir meu perfil', exact: true }).click();
+  await simulatedPage.getByRole('dialog').getByRole('button', { name: 'Sair da minha conta', exact: true }).click();
+  await simulatedPage.locator('input[name=email]').waitFor();
+  assert.equal((await (await admin.request.get('/api/state')).json()).notifications.subscriptionCount, 0);
+  assert.equal(await simulatedPage.evaluate(() => window.__simulatedPush.removed), 4);
+  await simulated.close();
+  assert.equal((await admin.request.post('/api/settings', { headers: { Origin: base }, data: { ...beforePush.settings, autoGenerate: false } })).status(), 200);
+  await page.reload();
+  await page.getByRole('heading', { name: 'Tudo em dia, casa leve.' }).waitFor();
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await nav('Administração');
   await page.locator('input[name=autoGenerate]').uncheck();
   await page.locator('input[name=skipHolidays]').uncheck();
@@ -247,6 +360,7 @@ try {
   state = await (await member.request.get('/api/state')).json(); assert.equal(state.user.photo_url, null);
   assert.equal((await member.request.get(originalPhotoUrl)).status(), 404);
 
+  console.log('OK: preferências de lembretes, persistência, canais sem credenciais desativados e orientação de instalação iPhone.');
   assert.deepEqual(errors, [], 'Erros no navegador');
   console.log('OK: login/sessão, convite real, permissão de morador, configurações, sorteio, conclusão, reset e novo sorteio.');
   console.log('OK: sete telas em 320, 390, 768 e 1440px, sem rolagem horizontal nem erros JavaScript.');

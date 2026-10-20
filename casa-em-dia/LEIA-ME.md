@@ -115,7 +115,7 @@ As fotos ficam no mesmo SQLite da casa e só podem ser consultadas por pessoas a
 
 ## Alertas, acesso e recuperação
 
-O sino mostra atividades pendentes. A opção de ativar alertas permite notificações do navegador enquanto a agenda está aberta. Elas exigem permissão e HTTPS ou `localhost`; em HTTP por IP, os alertas internos funcionam, mas o navegador pode bloquear notificações do sistema. Celulares podem suspender páginas em segundo plano. **WhatsApp, SMS, envio automático de e-mail e avisos com o app fechado não estão implementados.**
+O sino mostra atividades pendentes. Em **Meu perfil**, cada morador pode autorizar **Web Push**, **resumo diário por e-mail** e **SMS opcional**. Web Push pode avisar com a agenda fechada; no iPhone exige iOS 16.4 ou posterior, HTTPS válido e adicionar o app à Tela de Início. E-mail usa a Brevo, com 300 envios/dia no plano gratuito; SMS exige créditos pagos e fica desligado no servidor por padrão. O envio real depende da configuração do serviço, do consentimento do morador e do servidor ligado com internet. Siga o **[guia de notificações](docs/NOTIFICACOES.md)** para configurar, ativar e testar. WhatsApp não está implementado.
 
 Convites são privados, de uso único e válidos por 7 dias. Um novo convite invalida o anterior. O admin pode gerar **Novo acesso** para um morador redefinir a senha, encerrando as sessões antigas. Cada usuário pode mudar a própria senha no perfil. Se o único admin perder a senha, será necessário apoio de quem administra o servidor; não existe recuperação automática por e-mail. Guarde essa senha em um gerenciador de senhas.
 
@@ -128,9 +128,15 @@ Senhas são derivadas com scrypt e salt individual. Sessões usam cookies HttpOn
 | `PORT` | `3000` | Porta do servidor. |
 | `HOST` | `0.0.0.0` | Interface de rede; use `127.0.0.1` atrás de um proxy na mesma máquina. |
 | `CASA_DATA_DIR` | `.data` ao lado de `server.mjs` | Diretório persistente do SQLite. |
+| `CASA_PUBLIC_URL` | vazio | Endereço completo incluído nos avisos; vazio omite o link. |
+| `BREVO_API_KEY` | vazio | Chave privada de API da Brevo para e-mail e SMS. |
+| `BREVO_FROM_EMAIL` | vazio | Remetente de e-mail verificado na Brevo. |
+| `BREVO_FROM_NAME` | `Casa em Dia` | Nome exibido nos e-mails. |
+| `CASA_SMS_ENABLED` | `0` | `1` habilita SMS no servidor; exige créditos e autorização individual. |
+| `BREVO_SMS_SENDER` | `CasaEmDia` | Sender ID de SMS aprovado conforme as regras do país/provedor. |
 | `CASA_TRUST_PROXY` | desativado | Use `1` somente atrás de um proxy confiável que substitua `X-Forwarded-Proto` e preserve o Host. Permite cookies Secure ao acessar por HTTPS. Nesse caso, impeça acesso público direto à porta do app. |
 
-Configure essas variáveis no terminal antes de executar o Node. O `.env.example` se destina ao Docker Compose; o servidor customizado não carrega `.env` automaticamente. Não use o prefixo `NEXT_PUBLIC_` para valores privados.
+O servidor carrega `.env` ao lado de `server.mjs` na inicialização. Copie `.env.example` somente se ainda não tiver esse arquivo e ajuste seus valores; variáveis já definidas no terminal ou no contêiner têm prioridade. Reinicie o servidor após alterações. O Compose também lê `.env` e repassa as variáveis declaradas ao contêiner. Não use o prefixo `NEXT_PUBLIC_` para valores privados. Para ativar os canais de envio, veja [docs/NOTIFICACOES.md](docs/NOTIFICACOES.md).
 
 No PowerShell, por exemplo, um banco separado para experimentar:
 
@@ -147,6 +153,7 @@ Fechar esse terminal remove a variável da sessão, sem apagar o banco de testes
 | `components/` | Interface React e componentes da agenda. |
 | `public/` | Arquivos estáticos, como ícones. |
 | `server.mjs` | Servidor HTTP, API, autenticação e SQLite. |
+| `notifications.mjs` | Preferências, agendamento e envio de Web Push, e-mail e SMS. |
 | ules.mjs | Datas, folgas e pontuação. |
 | scheduling.mjs | Dias das atividades e limites dos sorteios. |
 | profile-photos.mjs | Validação e armazenamento das fotos no SQLite. |

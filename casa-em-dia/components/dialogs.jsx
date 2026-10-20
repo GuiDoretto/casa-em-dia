@@ -3,6 +3,7 @@ import { useState } from 'react';
 import ActivityIconPicker from './activity-icon-picker';
 import ActivityWeekdays from './activity-weekdays';
 import ProfilePhotoEditor from './profile-photo-editor';
+import NotificationSettings from './notification-settings';
 import { useHouse } from '../lib/house-context';
 import { formatDate, isDue, swappable, userFor } from '../lib/client.mjs';
 import { Avatar, Empty, Icon, Modal } from './ui';
@@ -146,6 +147,7 @@ function SwapDialog({ modal }) {
 function ProfileDialog() {
   const { state, busy, mutate, closeModal, notify, logout } = useHouse();
   return <div className="stack"><ProfilePhotoEditor user={state.user}/><div className="profile-summary row"><Avatar user={state.user}/><div><strong>{state.user.name}</strong><small>{state.user.email}</small></div></div>
+    <NotificationSettings/>
     <DialogForm submitLabel="Alterar minha senha" onSubmit={async data => {
       if (data.password !== data.confirmPassword) throw new Error('As novas senhas precisam ser iguais.');
       await mutate('change-password', { currentPassword: data.currentPassword, password: data.password });
@@ -161,10 +163,10 @@ function ProfileDialog() {
 }
 
 function NotificationsDialog() {
-  const { state, now, busy, act, enableNotifications, notificationPermission } = useHouse();
+  const { state, now, busy, act } = useHouse();
   const tasks = state.tasks.filter(task => task.assignee_id === state.user.id && task.status === 'pending' && task.due_date <= now.date).sort((a, b) => a.due_date.localeCompare(b.due_date) || a.deadline.localeCompare(b.deadline));
   return <div className="stack"><div>{tasks.map(task => <div className="notification-item" key={task.id}><Icon name="bell" size={18}/><div><strong>{task.title}</strong><small>{formatDate(task.due_date)} · até {task.deadline} · {isDue(task, now) ? 'em atraso' : 'pendente'}</small></div><button type="button" className="btn secondary compact" disabled={busy} onClick={() => act('complete', { id: task.id }, 'Atividade concluída. Obrigado por cuidar da casa!')}><Icon name="check" size={14}/>Concluir</button></div>)}{!tasks.length && <Empty title="Você fez sua parte" description="Nenhuma atividade pendente até hoje. A casa agradece!"/>}</div>
-    <section className="notifications-permission"><h3>Alertas neste aparelho</h3><p className="hint">A agenda pode repetir avisos a cada {state.settings.reminderMinutes} minutos enquanto estiver aberta. O navegador pode limitar avisos em segundo plano. Com o app fechado, não há envio de notificações.</p>{notificationPermission === 'denied' && <p className="hint">As notificações foram bloqueadas. Para permitir, altere a permissão deste site nas configurações do navegador.</p>}<button type="button" className="btn secondary" disabled={busy || notificationPermission === 'granted'} onClick={enableNotifications}><Icon name="bell" size={16}/>{notificationPermission === 'granted' ? 'Alertas ativados' : 'Ativar alertas neste aparelho'}</button></section>
+    <NotificationSettings/>
   </div>;
 }
 

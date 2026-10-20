@@ -8,6 +8,29 @@ import { Dashboard, Calendar, Draw, Residents, Ranking, Swaps } from './views';
 import Admin from './admin';
 import Dialogs from './dialogs';
 
+const PUSH_OWNER_KEY = 'casa-em-dia:push-user';
+function pushUnavailable() {
+  if (!window.isSecureContext) return 'Os avisos neste aparelho exigem HTTPS. O acesso por IP em HTTP não permite ativá-los.';
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const installed = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  if (ios && !installed) return 'No iPhone ou iPad, adicione o app à Tela de Início e abra-o pelo novo ícone para ativar os avisos.';
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return 'Este navegador não oferece avisos com o app fechado.';
+  return '';
+}
+function publicKeyBytes(value) {
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+  return Uint8Array.from(atob(padded), character => character.charCodeAt(0));
+}
+function subscriptionKeyMatches(subscription, publicKey) {
+  const key = subscription?.options?.applicationServerKey;
+  if (!key || !publicKey) return false;
+  try {
+    const actual = ArrayBuffer.isView(key) ? new Uint8Array(key.buffer, key.byteOffset, key.byteLength) : new Uint8Array(key);
+    const expected = publicKeyBytes(publicKey);
+    return actual.length === expected.length && actual.every((byte, index) => byte === expected[index]);
+  } catch { return false; }
+}
+
 const navigation = [
   ['home', 'home', 'Hoje'], ['calendar', 'calendar', 'Agenda'], ['draw', 'dice', 'Sorteador'],
   ['swaps', 'swap', 'Trocas'], ['people', 'users', 'Moradores'], ['ranking', 'trophy', 'Ranking'],
@@ -33,6 +56,10 @@ export default function HouseholdApp() {
   const [busy, setBusy] = useState(false);
   const [connection, setConnection] = useState('');
   const [notificationPermission, setNotificationPermission] = useState('default');
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushUnavailableReason, setPushUnavailableReason] = useState('');
+  const pushBusyRef = useRef(false), pushRegistrationRef = useRef(null), pushOwnerRef = useRef(null);
   const busyRef = useRef(false), revision = useRef(0), stateRef = useRef(state), toastTimeout = useRef();
   stateRef.current = state;
   const notify = useCallback(message => {
@@ -55,11 +82,11 @@ export default function HouseholdApp() {
     if (!state?.user.id) return;
     const controller = new AbortController();
     const refresh = async () => {
-      if (busyRef.current || document.hidden) return;
+      if (busyRef.current || pushBusyRef.current || document.hidden) return;
       const currentRevision = revision.current;
       try {
         const fresh = await api('state', undefined, {}, controller.signal);
-        if (revision.current === currentRevision && !busyRef.current) { setState(fresh); setConnection(''); }
+        if (revision.current === currentRevision && !busyRef.current && !pushBusyRef.current) { setState(fresh); setConnection(''); }
       } catch (error) {
         if (error.name === 'AbortError') return;
         if (error.status === 401) { setState(null); notify('Sua sessão terminou. Entre novamente.'); }
@@ -70,19 +97,62 @@ export default function HouseholdApp() {
     document.addEventListener('visibilitychange', refresh);
     return () => { clearInterval(timer); controller.abort(); document.removeEventListener('visibilitychange', refresh); };
   }, [state?.user.id, notify]);
+  const registerPushWorker = useCallback(() => {
+    if (!pushRegistrationRef.current) pushRegistrationRef.current = navigator.serviceWorker.register('/sw.js').catch(error => { pushRegistrationRef.current = null; throw error; });
+    return pushRegistrationRef.current;
+  }, []);
+  function pushOwner() {
+    try { return window.localStorage.getItem(PUSH_OWNER_KEY) || pushOwnerRef.current; } catch { return pushOwnerRef.current; }
+  }
+  function savePushOwner(userId) {
+    pushOwnerRef.current = userId;
+    try {
+      if (userId) window.localStorage.setItem(PUSH_OWNER_KEY, userId);
+      else window.localStorage.removeItem(PUSH_OWNER_KEY);
+    } catch {}
+  }
   useEffect(() => {
-    if (!state?.user.id || notificationPermission !== 'granted') return;
-    const timer = setInterval(() => {
-      if (!('Notification' in window) || Notification.permission !== 'granted') return;
-      const current = stateRef.current;
-      if (!current) return;
-      const pending = current.tasks.filter(t => t.assignee_id === current.user.id && t.status === 'pending' && t.due_date <= localNow().date);
-      if (pending.length) {
-        try { new Notification('Casa em Dia', { body: pending.length + ' atividade(s) esperando seu cuidado.', tag: 'casa-tarefas', icon: '/favicon.svg' }); } catch {}
-      }
-    }, state.settings.reminderMinutes * 60000);
-    return () => clearInterval(timer);
-  }, [state?.user.id, state?.settings.reminderMinutes, notificationPermission]);
+    if (!('serviceWorker' in navigator)) return;
+    const openTasks = event => { if (event.data?.type === 'OPEN_TASKS') navigate('home'); };
+    navigator.serviceWorker.addEventListener('message', openTasks);
+    return () => navigator.serviceWorker.removeEventListener('message', openTasks);
+  }, [navigate]);
+  useEffect(() => {
+    let active = true;
+    setPushEnabled(false);
+    const reason = pushUnavailable();
+    setPushUnavailableReason(reason);
+    if (!state?.user.id || reason || !state.notifications?.push?.configured) return;
+    const sync = async () => {
+      if (pushBusyRef.current) return;
+      try {
+        const registration = await registerPushWorker();
+        const subscription = await registration.pushManager.getSubscription();
+        const keyMatches = subscriptionKeyMatches(subscription, state.notifications?.push?.publicKey);
+        const device = subscription ? await api('push-device', { endpoint: subscription.endpoint }) : { subscribed: false };
+        if (!active || pushBusyRef.current) return;
+        if (subscription && !device.subscribed) {
+          pushBusyRef.current = true; setPushBusy(true);
+          try {
+            const removed = await subscription.unsubscribe();
+            if (!removed && await registration.pushManager.getSubscription()) throw new Error('Não foi possível desativar os avisos da sessão anterior. Clique em Ativar neste aparelho para tentar atualizar.');
+          } catch (error) { notify(error.message || 'Não foi possível desativar os avisos da sessão anterior. Tente novamente.'); }
+          finally { pushBusyRef.current = false; setPushBusy(false); }
+          savePushOwner(null);
+          if (active) setPushEnabled(false);
+          return;
+        }
+        setNotificationPermission(Notification.permission);
+        setPushEnabled(Boolean(device.subscribed && keyMatches && Notification.permission === 'granted'));
+        if (device.subscribed) savePushOwner(state.user.id);
+      } catch { if (active) setPushEnabled(false); }
+    };
+    sync();
+    window.addEventListener('focus', sync);
+    const onVisible = () => { if (!document.hidden) sync(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { active = false; window.removeEventListener('focus', sync); document.removeEventListener('visibilitychange', onVisible); };
+  }, [state?.user.id, state?.notifications?.push?.configured, state?.notifications?.push?.publicKey, state?.notifications?.subscriptionCount, registerPushWorker, notify]);
   async function mutate(path, data) {
     if (busyRef.current) throw new Error('Aguarde a operação atual terminar.');
     busyRef.current = true; setBusy(true); revision.current++;
@@ -97,19 +167,108 @@ export default function HouseholdApp() {
     try { const result = await mutate(path, data); if (message) notify(message); return result; }
     catch (error) { notify(error.message); return null; }
   }
-  async function enableNotifications() {
-    if (!('Notification' in window)) { notify('Este navegador não oferece alertas do sistema. Os lembretes da agenda continuam aqui.'); return; }
+  async function readyPushWorker() {
+    const registration = await registerPushWorker();
+    if (registration.active) return registration;
+    let timeout;
     try {
-      const permission = await Notification.requestPermission(); setNotificationPermission(permission);
-      notify(permission === 'granted' ? 'Alertas ativados neste aparelho enquanto a agenda estiver aberta.' : 'Permita notificações nas configurações do navegador.');
-    } catch { notify('Para ativar alertas, use HTTPS ou localhost.'); }
+      return await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((resolve, reject) => { timeout = setTimeout(() => reject(new Error('A ativação do aparelho demorou. Tente novamente.')), 20000); }),
+      ]);
+    } finally { clearTimeout(timeout); }
+  }
+  async function enableNotifications() {
+    if (busyRef.current || pushBusyRef.current || !state?.user.id) return;
+    const reason = pushUnavailable();
+    setPushUnavailableReason(reason);
+    if (reason) { notify(reason); return; }
+    const publicKey = state.notifications?.push?.publicKey;
+    if (!state.notifications?.push?.configured || !publicKey) { notify('Configuração de avisos pendente no servidor.'); return; }
+    pushBusyRef.current = true; setPushBusy(true);
+    let subscription, created = false, saved = false;
+    const userId = state.user.id;
+    try {
+      // Keep the permission request directly in the button's user gesture on iOS.
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission !== 'granted') { notify('Permita os avisos deste site nas configurações do navegador para ativá-los.'); return; }
+      const registration = await readyPushWorker();
+      subscription = await registration.pushManager.getSubscription();
+      const device = subscription ? await api('push-device', { endpoint: subscription.endpoint }) : { subscribed: false };
+      if (subscription && (!subscriptionKeyMatches(subscription, publicKey) || !device.subscribed)) {
+        if (device.subscribed) await mutate('push-unsubscribe', { endpoint: subscription.endpoint });
+        const removed = await subscription.unsubscribe();
+        if (!removed && await registration.pushManager.getSubscription()) throw new Error('Não foi possível atualizar os avisos deste aparelho. Tente novamente.');
+        subscription = null; savePushOwner(null); setPushEnabled(false);
+      }
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: publicKeyBytes(publicKey) });
+        created = true;
+      }
+      if (stateRef.current?.user.id !== userId) throw new Error('Sua sessão mudou. Entre novamente para ativar os avisos.');
+      await mutate('push-subscribe', { subscription: subscription.toJSON() });
+      saved = true; savePushOwner(userId); setPushEnabled(true);
+      notify('Avisos ativados neste aparelho, inclusive com a agenda fechada.');
+    } catch (error) {
+      if (created && !saved) { try { await subscription?.unsubscribe(); } catch {} }
+      notify(error.message || 'Não foi possível ativar os avisos neste aparelho.');
+    } finally { pushBusyRef.current = false; setPushBusy(false); }
+  }
+  async function removeDeviceSubscription() {
+    if (!window.isSecureContext || !('serviceWorker' in navigator) || !('PushManager' in window)) { setPushEnabled(false); savePushOwner(null); return; }
+    const registration = await navigator.serviceWorker.getRegistration('/');
+    const subscription = await registration?.pushManager.getSubscription();
+    if (!subscription) { setPushEnabled(false); savePushOwner(null); return; }
+    let remoteFailure, localFailure;
+    if (pushOwner() === stateRef.current?.user.id) {
+      try { await mutate('push-unsubscribe', { endpoint: subscription.endpoint }); }
+      catch (error) { remoteFailure = error; }
+    }
+    try {
+      const removed = await subscription.unsubscribe();
+      if (!removed && await registration.pushManager.getSubscription()) localFailure = new Error('O navegador não conseguiu desativar os avisos.');
+    } catch (error) { localFailure = error; }
+    if (localFailure && (remoteFailure || pushOwner() !== stateRef.current?.user.id)) throw new Error('Não foi possível desativar os avisos deste aparelho. Tente novamente antes de sair.');
+    setPushEnabled(false); savePushOwner(null);
+  }
+  async function disableNotifications() {
+    if (busyRef.current || pushBusyRef.current) return;
+    pushBusyRef.current = true; setPushBusy(true);
+    try { await removeDeviceSubscription(); notify('Avisos desativados neste aparelho.'); }
+    catch (error) { notify(error.message); }
+    finally { pushBusyRef.current = false; setPushBusy(false); }
+  }
+  async function testNotifications(channel) {
+    if (busyRef.current || pushBusyRef.current) return;
+    pushBusyRef.current = true; setPushBusy(true);
+    try {
+      const data = { channel };
+      if (channel === 'push') {
+        if (!pushEnabled || pushOwner() !== state.user.id) throw new Error('Ative primeiro os avisos neste aparelho.');
+        const registration = await readyPushWorker();
+        const subscription = await registration.pushManager.getSubscription();
+        if (!subscription) throw new Error('Ative novamente os avisos neste aparelho.');
+        data.endpoint = subscription.endpoint;
+      }
+      const result = await mutate('notification-test', data);
+      notify(result.message || 'O teste foi aceito pelo serviço. Aguarde a entrega.');
+      return result;
+    } catch (error) { notify(error.message); return null; }
+    finally { pushBusyRef.current = false; setPushBusy(false); }
   }
   async function logout() {
-    const result = await act('logout', {});
-    if (result) { setState(null); setModal(null); navigate('home'); }
+    if (busyRef.current || pushBusyRef.current) return;
+    pushBusyRef.current = true; setPushBusy(true);
+    try {
+      await removeDeviceSubscription();
+      const result = await act('logout', {});
+      if (result) { setState(null); setModal(null); navigate('home'); }
+    } catch (error) { notify(error.message); }
+    finally { pushBusyRef.current = false; setPushBusy(false); }
   }
   const isAdmin = state?.user.role === 'admin';
-  const context = { state, now, selected, setSelected, month, setMonth, navigate, isAdmin, busy, mutate, act, notify, openModal: setModal, closeModal: () => setModal(null), enableNotifications, notificationPermission, logout };
+  const context = { state, now, selected, setSelected, month, setMonth, navigate, isAdmin, busy: busy || pushBusy, mutate, act, notify, openModal: setModal, closeModal: () => setModal(null), enableNotifications, disableNotifications, testNotifications, pushEnabled, pushUnavailableReason, notificationPermission, logout };
   const pendingMine = state?.tasks.filter(t => t.assignee_id === state.user.id && t.status === 'pending' && t.due_date <= now.date) || [];
   const swapCount = state?.swaps.filter(s => s.status === 'pending' && s.recipient_id === state.user.id).length || 0;
   const currentView = !isAdmin && ['admin', 'draw'].includes(view) ? 'home' : view;

@@ -18,7 +18,7 @@ COPY --from=build --chown=node:node /app/package.json /app/package-lock.json ./
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/.next ./.next
 COPY --from=build --chown=node:node /app/public ./public
-COPY --from=build --chown=node:node /app/server.mjs /app/rules.mjs /app/activity-icons.mjs /app/scheduling.mjs /app/profile-photos.mjs /app/next.config.mjs ./
+COPY --from=build --chown=node:node /app/server.mjs /app/rules.mjs /app/activity-icons.mjs /app/scheduling.mjs /app/profile-photos.mjs /app/notifications.mjs /app/next.config.mjs ./
 RUN mkdir -p /app/.data && chown node:node /app/.data
 USER node
 EXPOSE 3000

@@ -52,8 +52,49 @@ export function Calendar() {
   const rows = Math.ceil(((new Date(month + '-01T12:00:00Z').getUTCDay() + 6) % 7 + Number(last.slice(8))) / 7);
   const tasks = state.tasks.filter(t => !person || t.assignee_id === person);
   const selectedTasks = tasks.filter(t => t.due_date === selected);
-  return <div className="calendar-layout"><section className="panel calendar-panel"><div className="calendar-toolbar"><MonthSwitcher/><div className="row"><button className="btn secondary small-btn" onClick={() => { setMonth(now.date.slice(0, 7)); setSelected(now.date); }}>Hoje</button><label className="sr-only" htmlFor="calendar-person">Filtrar morador</label><select id="calendar-person" value={person} onChange={e => setPerson(e.target.value)}><option value="">Todos os moradores</option>{state.users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div></div><div className="calendar-grid" role="group" aria-label={'Calendário de ' + monthLabel(month)}>{['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'].map(d => <div className="calendar-weekday" key={d}>{d}</div>)}{Array.from({ length: rows * 7 }, (_, i) => addDay(start, i)).map(day => {
-    const dayTasks = tasks.filter(t => t.due_date === day), reason = offReason(day, state.settings);
-    return <button key={day} onClick={() => setSelected(day)} className={'calendar-day ' + (day.slice(0, 7) !== month ? 'outside ' : '') + (selected === day ? 'selected ' : '') + (day === now.date ? 'today ' : '')} aria-pressed={day === selected} aria-label={formatDate(day) + ', ' + dayTasks.length + ' atividades' + (reason ? ', ' + reason : '')}><span className="calendar-number">{Number(day.slice(8))}</span>{reason && !dayTasks.length && <small className="calendar-off">{reason}</small>}{dayTasks.slice(0, 2).map(t => <span key={t.id} className={'calendar-task ' + t.status}>{t.title}</span>)}{dayTasks.length > 2 && <small className="calendar-more">+{dayTasks.length - 2} atividade(s)</small>}</button>;
-  })}</div><div className="calendar-legend"><span><i/>Pendente</span><span><i className="done"/>Concluída</span><span><i className="paused"/>Pausada</span></div></section><aside className="calendar-side"><div className="section-heading"><div><p className="eyebrow">{formatDate(selected, { weekday: 'long' })}</p><h2>{formatDate(selected)}</h2></div></div><div className="task-list">{selectedTasks.length ? selectedTasks.map(t => <TaskCard key={t.id} task={t}/>) : <Empty title={offReason(selected, state.settings) || 'Dia livre na agenda'}>Nenhuma atividade cadastrada para este dia.</Empty>}</div></aside></div>;
+  return <div className="calendar-layout">
+    <section className="panel calendar-panel">
+      <div className="calendar-toolbar">
+        <MonthSwitcher/>
+        <div className="row">
+          <button className="btn secondary small-btn" onClick={() => { setMonth(now.date.slice(0, 7)); setSelected(now.date); }}>Hoje</button>
+          <label className="sr-only" htmlFor="calendar-person">Filtrar morador</label>
+          <select id="calendar-person" value={person} onChange={e => setPerson(e.target.value)}>
+            <option value="">Todos os moradores</option>
+            {state.users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        </div>
+      </div>
+      <p className="calendar-mobile-hint"><Icon name="calendar" size={14}/>Toque no dia para ver as atividades</p>
+      <div className="calendar-grid" role="group" aria-label={'Calendário de ' + monthLabel(month)}>
+        {['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'].map(d => <div className="calendar-weekday" key={d}>{d}</div>)}
+        {Array.from({ length: rows * 7 }, (_, i) => addDay(start, i)).map(day => {
+          const dayTasks = tasks.filter(t => t.due_date === day), reason = offReason(day, state.settings);
+          return <button key={day} onClick={() => setSelected(day)}
+            className={'calendar-day ' + (day.slice(0, 7) !== month ? 'outside ' : '') + (selected === day ? 'selected ' : '') + (day === now.date ? 'today ' : '')}
+            aria-pressed={day === selected} aria-current={day === now.date ? 'date' : undefined}
+            aria-controls="calendar-selected-tasks"
+            aria-label={formatDate(day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + dayTasks.length + (dayTasks.length === 1 ? ' atividade' : ' atividades') + (reason ? ', ' + reason : '')}>
+            <span className="calendar-number">{Number(day.slice(8))}</span>
+            <span className="calendar-day-summary" aria-hidden="true">
+              {dayTasks.length > 0 ? <><span className="calendar-task-count">{dayTasks.length}</span><span className="calendar-status-dots">{['pending', 'done', 'paused'].filter(status => dayTasks.some(task => task.status === status)).map(status => <i key={status} className={status}/>)}</span></> : reason ? <Icon name="leaf" size={12}/> : null}
+            </span>
+            <span className="calendar-day-details">
+              {reason && !dayTasks.length && <small className="calendar-off">{reason}</small>}
+              {dayTasks.slice(0, 2).map(t => <span key={t.id} className={'calendar-task ' + t.status}>{t.title}</span>)}
+              {dayTasks.length > 2 && <small className="calendar-more">+{dayTasks.length - 2} atividade(s)</small>}
+            </span>
+          </button>;
+        })}
+      </div>
+      <div className="calendar-legend"><span><i/>Pendente</span><span><i className="done"/>Concluída</span><span><i className="paused"/>Pausada</span></div>
+    </section>
+    <aside className="calendar-side" id="calendar-selected-tasks" aria-label="Atividades do dia selecionado">
+      <div className="section-heading calendar-day-heading" aria-live="polite" aria-atomic="true">
+        <div><p className="eyebrow">{selected === now.date ? 'Hoje · ' : ''}{formatDate(selected, { weekday: 'long' })}</p><h2>{formatDate(selected)}</h2></div>
+        <span className="calendar-selected-count">{selectedTasks.length} {selectedTasks.length === 1 ? 'atividade' : 'atividades'}</span>
+      </div>
+      <div className="task-list">{selectedTasks.length ? selectedTasks.map(t => <TaskCard key={t.id} task={t}/>) : <Empty title={offReason(selected, state.settings) || 'Dia livre na agenda'}>Nenhuma atividade cadastrada para este dia.</Empty>}</div>
+    </aside>
+  </div>;
 }

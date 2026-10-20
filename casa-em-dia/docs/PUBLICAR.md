@@ -35,7 +35,7 @@ O Caddy receberá as conexões e obterá os certificados HTTPS. Para isso, domí
 
 ## 3. Envie o projeto e configure o domínio
 
-Copie o código para uma pasta privada do servidor, por exemplo `/opt/casa-em-dia`, por Git ou SFTP. A pasta deve conter `package.json`, `package-lock.json`, `Dockerfile`, `compose.yaml`, `deploy/`, `app/`, os componentes e todos os arquivos do servidor, incluindo `scheduling.mjs` e `profile-photos.mjs`. Não envie `node_modules` nem `.next`: a imagem Docker prepara a versão Linux.
+Copie o código para uma pasta privada do servidor, por exemplo `/opt/casa-em-dia`, por Git ou SFTP. A pasta deve conter `package.json`, `package-lock.json`, `Dockerfile`, `compose.yaml`, `deploy/`, `app/`, os componentes e todos os arquivos do servidor, incluindo `scheduling.mjs`, `profile-photos.mjs` e `notifications.mjs`. Não envie `node_modules` nem `.next`: a imagem Docker prepara a versão Linux.
 
 Se houver dados locais para levar, faça a migração da próxima seção **antes de iniciar a hospedagem**. A `.data` não entra na imagem Docker e não deve ir para um repositório público.
 
@@ -51,9 +51,10 @@ Substitua os exemplos pelos seus valores reais:
 ```dotenv
 CASA_DOMAIN=casa.seudominio.com.br
 ACME_EMAIL=voce@seudominio.com.br
+CASA_PUBLIC_URL=https://casa.seudominio.com.br
 ```
 
-Use somente o domínio: sem `https://`, barras ou caminho. O e-mail é usado no cadastro do certificado. O `.env` é lido pelo Compose; não é necessário alterar o código ou colocar esses dados no navegador.
+Em `CASA_DOMAIN`, use somente o domínio: sem `https://`, barras ou caminho. `ACME_EMAIL` é usado no cadastro do certificado. `CASA_PUBLIC_URL` usa o endereço HTTPS completo e real para links nos avisos; se ficar vazia, os avisos não incluem link. O `.env` é lido pelo Compose; as variáveis declaradas em `environment` são repassadas ao app. Na execução local sem Docker, o servidor também lê `.env` ao iniciar, preservando variáveis já definidas no terminal.
 
 Confira a configuração e construa a imagem:
 
@@ -144,6 +145,14 @@ docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter c
 ```
 
 Se mudar o domínio ou e-mail em `.env`, aplique também `docker compose up -d` para recriar o ambiente do Caddy.
+
+### Configurar os canais de notificação
+
+Para e-mail, crie e valide uma conta Brevo e um remetente, preencha `BREVO_API_KEY`, `BREVO_FROM_EMAIL` e `BREVO_FROM_NAME` no `.env` e recrie o app. A chave é da API, não do SMTP. O plano gratuito oferece 300 e-mails/dia; as regras vigentes estão na [Brevo](https://help.brevo.com/hc/en-us/articles/208580669-FAQs-What-are-the-limits-of-the-Free-plan). Sem credenciais, o canal permanece indisponível. SMS exige créditos pagos, remetente registrado quando solicitado e `CASA_SMS_ENABLED=1`; o padrão `0` mantém SMS desligado. A habilitação no servidor ainda exige autorização de cada morador no próprio perfil.
+
+Web Push precisa de HTTPS válido. No iPhone/iPad, use iOS/iPadOS 16.4 ou posterior, adicione o site à Tela de Início e ative os avisos pelo app instalado. O servidor precisa de internet e deve permanecer ligado para os avisos com o app fechado. O estado `healthy` não verifica credenciais nem entrega de mensagens. Siga o **[guia de notificações](NOTIFICACOES.md)** para configuração, testes, horários e limites.
+
+Depois de editar as variáveis de envio, execute `docker compose up -d app`. Reiniciar o contêiner com `restart` sozinho não aplica mudanças no ambiente. O `.env` não entra na imagem Docker. Não compartilhe esse arquivo, as chaves ou a saída interpolada de `docker compose config`.
 
 ### Fotos e armazenamento persistente
 

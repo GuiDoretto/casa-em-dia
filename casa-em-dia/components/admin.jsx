@@ -5,6 +5,7 @@ import { weekdaySummary } from './activity-weekdays';
 import { useHouse } from '../lib/house-context';
 import { exportData, formatDate } from '../lib/client.mjs';
 import { Empty, Icon } from './ui';
+import { NotificationServerStatus } from './notification-settings';
 
 function CheckSetting({ name, title, description, value, onChange, disabled }) {
   return <label className="check-row"><span><strong>{title}</strong><small>{description}</small></span><input name={name} type="checkbox" checked={value} onChange={event => onChange(event.target.checked)} disabled={disabled}/></label>;
@@ -44,7 +45,7 @@ function SettingsForm({ settings }) {
     <CheckSetting name="skipHolidays" title="Respeitar feriados" description="Feriados nacionais e as datas extras cadastradas ao lado." value={draft.skipHolidays} onChange={value => change('skipHolidays', value)} disabled={busy}/>
     <CheckSetting name="autoGenerate" title="Gerar as tarefas diárias" description="Com o servidor ligado, sorteia o que faltar para hoje a cada minuto." value={draft.autoGenerate} onChange={value => change('autoGenerate', value)} disabled={busy}/>
     <CheckSetting name="paused" title="Pausar a limpeza da casa" description="Pausa as tarefas de hoje e futuras. As concluídas ficam no histórico." value={draft.paused} onChange={value => change('paused', value)} disabled={busy}/>
-    <label className="field"><span>Repetir alertas a cada</span><select name="reminderMinutes" value={draft.reminderMinutes} onChange={event => change('reminderMinutes', Number(event.target.value))} disabled={busy}>{[15, 30, 60, 120].map(minutes => <option key={minutes} value={minutes}>{minutes} minutos</option>)}</select><small className="hint">Os avisos dependem da permissão do navegador e da agenda aberta.</small></label>
+    <label className="field"><span>Repetir alertas a cada</span><select name="reminderMinutes" value={draft.reminderMinutes} onChange={event => change('reminderMinutes', Number(event.target.value))} disabled={busy}>{[15, 30, 60, 120].map(minutes => <option key={minutes} value={minutes}>{minutes} minutos</option>)}</select><small className="hint">O servidor repete os avisos nos aparelhos ativados, durante o dia e enquanto houver tarefas pendentes.</small></label>
     {error && <p className="form-error" role="alert">{error}</p>}
     <button type="submit" className="btn full" disabled={busy}><Icon name="check" size={16}/>{busy ? 'Salvando…' : 'Salvar configurações'}</button>
   </form>;
@@ -89,6 +90,7 @@ export default function Admin() {
   return <div className="admin-layout">
     <SettingsForm key={settingsKey} settings={state.settings}/>
     <div className="stack">
+      <NotificationServerStatus/>
       <section className="panel admin-section"><div className="row between"><div><h2>Atividades recorrentes</h2><p className="hint">O que entra na divisão dos dias ativos.</p></div><button type="button" className="icon-btn" aria-label="Adicionar atividade recorrente" disabled={busy} onClick={() => openModal({ type: 'template' })}><Icon name="plus" size={19}/></button></div>
         {state.templates.map(template => <div className="template-row" key={template.id}><span className={'task-icon ' + resolveActivityIcon(template)}><Icon name={resolveActivityIcon(template)} size={21}/></span><div><strong>{template.title}</strong>{!template.active && <span className="pill">Inativa</span>}<small>{template.area} · {template.duration} min · até {template.deadline}</small><small className="template-weekdays">{weekdaySummary(template.weekdays)}</small></div><button type="button" className="icon-btn" aria-label={'Editar ' + template.title} disabled={busy} onClick={() => openModal({ type: 'template', template })}><Icon name="edit" size={16}/></button></div>)}
         {!state.templates.length && <p className="hint">Adicione uma atividade para começar os sorteios.</p>}

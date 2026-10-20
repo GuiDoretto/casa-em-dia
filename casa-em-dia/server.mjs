@@ -8,9 +8,12 @@ import { networkInterfaces } from 'node:os';
 import { localNow, validDate, nationalHolidays, defaultSettings, offReason, award, swappable } from './rules.mjs';
 import { isActivityIcon, resolveActivityIcon } from './activity-icons.mjs';
 import { createPhotoStore } from './profile-photos.mjs';
+import { createNotifications } from './notifications.mjs';
+import { loadEnvFile } from 'node:process';
 import { ALL_WEEKDAYS, templateWeekdays, templateEligible, addDays, startOfWeek, requestedDates, planWeeklySlots } from './scheduling.mjs';
 
 const root=dirname(fileURLToPath(import.meta.url));
+try { loadEnvFile(resolve(root,'.env')); } catch(error) { if(error.code!=='ENOENT')throw error; }
 const dataDir=resolve(process.env.CASA_DATA_DIR || resolve(root,'.data'));
 mkdirSync(dataDir,{recursive:true});
 const db=new DatabaseSync(resolve(dataDir,'casa.sqlite'));
@@ -41,6 +44,7 @@ const run=(sql,...args)=>db.prepare(sql).run(...args);
 const profilePhotos=createPhotoStore(db,fail);
 const settings=()=>({...defaultSettings,...JSON.parse(one('SELECT value FROM settings WHERE id=1')?.value || '{}')});
 const configured=()=>!!one('SELECT id FROM users LIMIT 1');
+const notifications=createNotifications({db,settings});
 function transaction(fn) { db.exec('BEGIN IMMEDIATE'); try { const result=fn();db.exec('COMMIT');return result; } catch(e) {db.exec('ROLLBACK');throw e;} }
 function fail(message,status=400) { throw Object.assign(new Error(message),{status}); }
 function text(value,label,max=150) { if(typeof value!=='string' || !value.trim() || value.trim().length>max) fail(`${label}: preencha um valor válido de até ${max} caracteres.`);return value.trim(); }
@@ -67,7 +71,7 @@ function newSession(user,res,req) { const token=randomBytes(32).toString('hex');
 function view(user) {
  const s=settings();const now=localNow();
  const users=(user.role==='admin'?all('SELECT id,name,email,phone,role,active,password_hash IS NOT NULL AS registered FROM users ORDER BY name'):all('SELECT id,name,role,active FROM users ORDER BY name')).map(person=>({...person,photo_url:profilePhotos.photoUrl(person.id)}));
- return {archivedCalendars:user.role==='admin'?all('SELECT id,archived_at,archived_by,task_count,swap_count FROM calendar_archives ORDER BY archived_at DESC'):undefined,user:{id:user.id,name:user.name,email:user.email,phone:user.phone,role:user.role,photo_url:profilePhotos.photoUrl(user.id)},users,tasks:all('SELECT * FROM tasks ORDER BY due_date,deadline,title'),templates:all('SELECT * FROM templates ORDER BY title').map(template=>({...template,weekdays:templateWeekdays(template)})),swaps:all('SELECT * FROM swaps ORDER BY created_at DESC'),settings:s,holidays:nationalHolidays(Number(now.date.slice(0,4))),now};
+ return {notifications:notifications.status(user.id),archivedCalendars:user.role==='admin'?all('SELECT id,archived_at,archived_by,task_count,swap_count FROM calendar_archives ORDER BY archived_at DESC'):undefined,user:{id:user.id,name:user.name,email:user.email,phone:user.phone,role:user.role,photo_url:profilePhotos.photoUrl(user.id)},users,tasks:all('SELECT * FROM tasks ORDER BY due_date,deadline,title'),templates:all('SELECT * FROM templates ORDER BY title').map(template=>({...template,weekdays:templateWeekdays(template)})),swaps:all('SELECT * FROM swaps ORDER BY created_at DESC'),settings:s,holidays:nationalHolidays(Number(now.date.slice(0,4))),now};
 }
 function generate(dates) {
  const s=settings(),people=all('SELECT id FROM users WHERE active=1 ORDER BY id'),templates=all('SELECT * FROM templates WHERE active=1');
@@ -125,6 +129,25 @@ async function api(req,res,path) {
  const user=session(req);if(!user)fail('Entre para acessar a agenda da casa.',401);
  if(req.method==='GET'&&path==='/api/state')return view(user);
  if(req.method==='GET'&&path==='/api/export'){requireAdmin(user);return {exportedAt:new Date().toISOString(),...view(user),archivedCalendars:all('SELECT * FROM calendar_archives ORDER BY archived_at DESC').map(archive=>({...archive,data:JSON.parse(archive.data)}))};}
+ if(req.method==='POST'&&path==='/api/notification-preferences')return transaction(()=>{
+  if(b.phone!==undefined)run('UPDATE users SET phone=? WHERE id=?',phone(b.phone),user.id);
+  notifications.savePreferences(user.id,b);
+  return view(one('SELECT * FROM users WHERE id=?',user.id));
+ });
+ if(req.method==='POST'&&path==='/api/push-device')return {subscribed:notifications.hasSubscription(user.id,b.endpoint)};
+ if(req.method==='POST'&&path==='/api/push-subscribe')return transaction(()=>{
+  notifications.subscribe(user.id,b.subscription);
+  return view(user);
+ });
+ if(req.method==='POST'&&path==='/api/push-unsubscribe')return transaction(()=>{
+  notifications.unsubscribe(user.id,b.endpoint);
+  return view(user);
+ });
+ if(req.method==='POST'&&path==='/api/notification-test'){
+  rateLimit(req,'notification-test',20);
+  await notifications.sendTest(user.id,b.channel,b.endpoint);
+  return {ok:true,message:'Teste aceito pelo serviço de envio. O recebimento pode levar alguns instantes.'};
+ }
  if(req.method==='POST'&&path==='/api/logout') {const cookie=req.headers.cookie?.split(';').map(s=>s.trim()).find(s=>s.startsWith('casa_session='))?.slice(13);if(cookie)run('DELETE FROM sessions WHERE hash=?',hash(cookie));res.setHeader('Set-Cookie','casa_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return {ok:true};}
  if(req.method!=='POST')fail('Página não encontrada.',404);
  return transaction(()=>{
@@ -161,6 +184,7 @@ async function api(req,res,path) {
   } else if(path==='/api/save-user') {
    requireAdmin(user);const id=b.id||uid(),name=text(b.name,'Nome',70),mail=email(b.email),tel=phone(b.phone||'');const existing=one('SELECT * FROM users WHERE id=?',id);if(one('SELECT id FROM users WHERE email=? AND id!=?',mail,id))fail('Este e-mail já está cadastrado.');
    if(existing){if(id===user.id&&b.active===false)fail('Você não pode desativar a própria conta.');if(b.active===false&&one("SELECT id FROM tasks WHERE assignee_id=? AND status IN ('pending','paused') LIMIT 1",id))fail('Reatribua as atividades pendentes deste morador antes de desativá-lo.');run('UPDATE users SET name=?,email=?,phone=?,active=? WHERE id=?',name,mail,tel,b.active===false?0:1,id);if(!b.active)run('DELETE FROM sessions WHERE user_id=?',id);}else{run('INSERT INTO users(id,name,email,phone) VALUES(?,?,?,?)',id,name,mail,tel);}
+   if(existing)notifications.contactChanged(id,{emailChanged:mail!==existing.email,phoneChanged:tel!==existing.phone,deactivated:b.active===false});
    if(!existing){const token=randomBytes(24).toString('hex');run('UPDATE users SET invite_hash=?,invite_expires=? WHERE id=?',hash(token),Date.now()+7*86400000,id);extra={inviteToken:token};}
   } else if(path==='/api/invite') {
    requireAdmin(user);if(b.id===user.id)fail('Use a própria sessão para alterar sua senha.');activeUser(b.id);const token=randomBytes(24).toString('hex');run('UPDATE users SET invite_hash=?,invite_expires=? WHERE id=?',hash(token),Date.now()+7*86400000,b.id);extra={inviteToken:token};
@@ -214,6 +238,7 @@ const server=http.createServer(async(req,res)=>{
    const result=await api(req,res,path);
    res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(result));return;
   }
+  if(path==='/sw.js'){res.setHeader('Cache-Control','no-cache');res.setHeader('Service-Worker-Allowed','/');}
   if(handleNext){await handleNext(req,res);return;}
   res.writeHead(404,{'Content-Type':'text/plain; charset=utf-8'});res.end('Página não encontrada.');
  } catch(error) {
@@ -233,17 +258,21 @@ function automaticGeneration(){
   });
  }catch(error){console.error('Geração diária:',error.message);}
 }
-const timer=setInterval(automaticGeneration,60000);timer.unref();
+async function maintenance(){
+ automaticGeneration();
+ try { await notifications.tick(); } catch { console.error('Não foi possível processar os lembretes. Confira o estado dos canais na agenda.'); }
+}
+const timer=setInterval(()=>{void maintenance();},60000);timer.unref();
 server.listen(port,host,()=>{
  console.log('\nCasa em Dia · http://localhost:'+server.address().port);
  if(!configured())console.log('Configure sua casa: http://localhost:'+server.address().port+'/?configurar='+setupToken+'\nGuarde esse link até criar o administrador. Não o compartilhe.');
  for(const net of Object.values(networkInterfaces()).flat())if(net.family==='IPv4'&&!net.internal)console.log('Na mesma rede Wi-Fi: http://'+net.address+':'+server.address().port);
- automaticGeneration();
+ void maintenance();
 });
-server.on('error',error=>{console.error('Não foi possível abrir a porta do servidor:',error.message);clearInterval(timer);db.close();process.exit(1);});
+server.on('error',async error=>{console.error('Não foi possível abrir a porta do servidor:',error.message);clearInterval(timer);await notifications.stop();db.close();process.exit(1);});
 let shuttingDown=false;
 for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{
  if(shuttingDown)return;shuttingDown=true;clearInterval(timer);
- server.close(async()=>{try{await nextApp?.close();}finally{db.close();process.exit(0);}});
+ server.close(async()=>{try{await notifications.stop();await nextApp?.close();}finally{db.close();process.exit(0);}});
  server.closeIdleConnections();
 });
