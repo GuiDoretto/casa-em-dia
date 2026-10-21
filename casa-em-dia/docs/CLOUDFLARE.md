@@ -178,13 +178,18 @@ Referência: [Cron Triggers](https://developers.cloudflare.com/workers/configura
 
 O CI executa instalação pelo lockfile, testes, build e verificação do runtime Cloudflare local em pushes e pull requests. Ele não usa credenciais Cloudflare, não importa dados reais e não publica. As ações GitHub usadas estão fixadas em commits completos.
 
-A publicação tem um workflow separado, **Publicar na Cloudflare**, iniciado somente em **Actions → Run workflow**, na branch padrão. Para habilitá-lo:
+A publicação tem um workflow separado, **Publicar na Cloudflare**, disparado automaticamente quando um commit entra na `main` e altera a aplicação ou os workflows. O fluxo normal é **abrir PR → revisar/aprovar → fazer merge na main → testes e build → deploy**. Aprovar uma revisão sem fazer merge ainda não publica. Um push direto na `main` também dispara o deploy; para exigir PR, configure as regras de proteção da branch.
 
-1. No GitHub, abra **Settings → Environments** e crie `cloudflare-production`.
-2. Na Cloudflare, crie um API token pelo modelo **Edit Cloudflare Workers**, limitado à conta de destino. Guarde-o como secret `CLOUDFLARE_API_TOKEN` nesse environment.
-3. Copie o ID da conta Cloudflare para o secret `CLOUDFLARE_ACCOUNT_ID` no mesmo environment.
-4. Execute o workflow manual e acompanhe o resultado. O deploy só recebe as credenciais na etapa de publicação.
+O workflow instala as dependências pelo lockfile, executa os testes e o runtime Cloudflare local e só então publica. As publicações são serializadas, e uma execução antiga não publica se seu commit já deixou de ser o atual da `main`. Depois do deploy, verifica o acesso público ao site e ao banco. **Actions → Publicar na Cloudflare → Run workflow** continua disponível para publicar novamente o commit atual da branch padrão.
 
+A configuração de credenciais é feita uma vez:
+
+1. No GitHub, abra **Settings → Environments** e crie `cloudflare-production`. Permita publicações somente da branch `main`, sem revisores obrigatórios nesse environment para o deploy seguir automaticamente após o merge.
+2. Na Cloudflare, crie um API token pelo modelo **Edit Cloudflare Workers**, limitado à conta de destino. Guarde-o como secret `CLOUDFLARE_API_TOKEN` nesse environment. Não use a senha do site nem o token OAuth temporário do login Wrangler.
+3. Copie o ID da conta Cloudflare para a variable `CLOUDFLARE_ACCOUNT_ID` no mesmo environment. Esse identificador não é uma senha; o workflow também aceita o secret legado com o mesmo nome.
+4. Faça merge de um PR e acompanhe **Actions → Publicar na Cloudflare**. O deploy só recebe as credenciais nas etapas de validação e publicação.
+
+Para um repositório mantido por uma pessoa, o merge é a decisão de publicação: o GitHub não permite aprovar formalmente seu próprio PR. Se outras pessoas contribuírem, você pode exigir revisão e o check `verify` nas regras da `main`.
 As chaves de e-mail e os tokens operacionais permanecem nos secrets do Worker, cadastrados pelo Wrangler. Não coloque snapshots, banco, `.env` ou tokens de migração em artifacts do Actions. O workflow publica código e assets; não executa a importação nem altera `CASA_SCHEDULE_ENABLED` automaticamente.
 
 Referência: [Cloudflare com GitHub Actions](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/).
@@ -211,6 +216,22 @@ O download valida o snapshot recebido, não sobrescreve arquivos existentes e re
 Esse procedimento é manual. O projeto não configura armazenamento externo de backups nem sua execução automática.
 
 ## Operação, recuperação e limites
+
+### Conta administrativa com login `admin`
+
+O login aceita e-mail dos moradores e o usuário reservado `admin`. Essa conta tem acesso à Administração e a **Moradores → Adicionar morador**, que gera um convite individual para cada pessoa criar sua senha.
+
+Para provisionar a conta em uma casa já configurada, primeiro publique o código atualizado. Crie um arquivo local `.env.admin`, ignorado pelo Git, com `CASA_ADMIN_PASSWORD` contendo a senha escolhida (10 a 128 caracteres). Execute:
+
+```powershell
+node scripts/create-admin.mjs --url https://casa-em-dia.casa-em-dia.workers.dev --env-file .env.admin
+```
+
+O script envia somente salt e hash por stdin ao segredo temporário `CASA_ADMIN_BOOTSTRAP`, confirma o login e a permissão administrativa, remove esse segredo e confirma novamente o acesso persistido. Apague o arquivo `.env.admin` depois. Uma conta `admin` existente conserva sua senha e seus dados; executar o provisionamento novamente não redefine a senha.
+
+A conta usa inicialmente o endereço interno `admin@casa-em-dia.invalid`, sem caixa de e-mail. Cadastre seu e-mail real em **Moradores → Editar** antes de habilitar notificações por e-mail. O login `admin` continua funcionando após essa edição.
+
+### Cuidados de operação
 
 - Confira periodicamente no painel o consumo de Workers e Durable Objects. O Free possui quotas e pode recusar operações ao esgotá-las; não representa capacidade ilimitada.
 - O armazenamento SQLite de DO tem recuperação por ponto no tempo com bookmarks. Antes de uma alteração de esquema, registre o bookmark e faça um backup independente. Recuperar código de um deploy anterior não desfaz escritas no banco.
