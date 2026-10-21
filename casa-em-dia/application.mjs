@@ -4,6 +4,7 @@ import { isActivityIcon, resolveActivityIcon } from './activity-icons.mjs';
 import { createPhotoStore } from './profile-photos.mjs';
 import { createNotifications } from './notifications.mjs';
 import { ALL_WEEKDAYS, templateWeekdays, templateEligible, addDays, startOfWeek, requestedDates, planWeeklySlots } from './scheduling.mjs';
+import { ADMIN_USER_ID, provisionAdministrator } from './administrator.mjs';
 
 // Shared synchronous application core. The host owns storage and HTTP lifecycle.
 // A supplied transaction must execute the callback synchronously and roll it back on error.
@@ -26,6 +27,7 @@ export function createHouseApplication({ db, env = process.env, setupToken = ran
         if (!db.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === 'icon')) db.exec(`ALTER TABLE ${table} ADD COLUMN icon TEXT NOT NULL DEFAULT ''`);
     }
     if (!db.prepare('PRAGMA table_info(templates)').all().some(column => column.name === 'weekdays')) db.exec("ALTER TABLE templates ADD COLUMN weekdays TEXT NOT NULL DEFAULT '[0,1,2,3,4,5,6]'");
+    provisionAdministrator(db, env.CASA_ADMIN_BOOTSTRAP);
     const uid = () => randomBytes(12).toString('hex');
     const hash = s => createHash('sha256').update(s).digest('hex');
     const one = (sql, ...args) => db.prepare(sql).get(...args);
@@ -114,7 +116,18 @@ export function createHouseApplication({ db, env = process.env, setupToken = ran
         if (req.method !== 'GET') sameOrigin(req);
         const b = req.method === 'GET' ? {} : await body(req, path === '/api/profile-photo' ? 300 * 1024 : 16384);
         if (path === '/api/setup' && req.method === 'POST') return transaction(() => { if (configured()) fail('A casa já foi configurada.', 409); if (!setupToken || req.headers['x-setup-token'] !== setupToken) fail('Use o link de configuração exibido no terminal do servidor.', 403); const p = password(b.password), id = uid(); run('INSERT INTO users(id,name,email,phone,role,password_hash,password_salt) VALUES(?,?,?,?,?,?,?)', id, text(b.name, 'Nome', 70), email(b.email), phone(b.phone || ''), 'admin', p.digest, p.salt); const s = { ...defaultSettings, houseName: text(b.houseName, 'Nome da casa', 70) }; run('INSERT INTO settings VALUES(1,?)', JSON.stringify(s)); for (const [title, area, duration] of [['Limpar a cozinha', 'Cozinha', 20], ['Cuidar da sala', 'Sala', 15], ['Limpar o banheiro', 'Banheiro', 25], ['Recolher o lixo', 'Área de serviço', 10]]) run('INSERT INTO templates(id,title,area,duration,deadline,active,icon) VALUES(?,?,?,?,?,1,?)', uid(), title, area, duration, '20:00', resolveActivityIcon({ title, area })); const user = one('SELECT * FROM users WHERE id=?', id); newSession(user, res, req); return view(user); });
-        if (path === '/api/login' && req.method === 'POST') { rateLimit(req, 'login'); const u = one('SELECT * FROM users WHERE email=? AND active=1', email(b.email)); if (typeof b.password !== 'string' || b.password.length > 128) fail('E-mail ou senha incorretos.', 401); const salt = u?.password_salt || 'invalid-salt', candidate = scryptSync(b.password, salt, 64); if (!u?.password_hash || !timingSafeEqual(candidate, Buffer.from(u.password_hash, 'hex'))) fail('E-mail ou senha incorretos.', 401); newSession(u, res, req); return view(u); }
+        if (path === '/api/login' && req.method === 'POST') {
+            rateLimit(req, 'login');
+            const login = typeof b.email === 'string' ? b.email.trim().toLowerCase() : '';
+            const u = login === 'admin'
+                ? one("SELECT * FROM users WHERE id=? AND role='admin' AND active=1", ADMIN_USER_ID)
+                : one('SELECT * FROM users WHERE email=? AND active=1', email(b.email));
+            if (typeof b.password !== 'string' || b.password.length > 128) fail('Usuário ou senha incorretos.', 401);
+            const salt = u?.password_salt || 'invalid-salt', candidate = scryptSync(b.password, salt, 64);
+            if (!u?.password_hash || !timingSafeEqual(candidate, Buffer.from(u.password_hash, 'hex'))) fail('Usuário ou senha incorretos.', 401);
+            newSession(u, res, req);
+            return view(u);
+        }
         if (path === '/api/accept-invite' && req.method === 'POST') { rateLimit(req, 'accept'); return transaction(() => { const u = one('SELECT * FROM users WHERE invite_hash=? AND invite_expires>? AND active=1', hash(String(b.token || '')), Date.now()); if (!u) fail('Convite inválido ou expirado.'); const p = password(b.password); run('UPDATE users SET password_hash=?,password_salt=?,invite_hash=NULL,invite_expires=NULL WHERE id=?', p.digest, p.salt, u.id); run('DELETE FROM sessions WHERE user_id=?', u.id); newSession(u, res, req); return view(u); }); }
         const user = session(req); if (!user) fail('Entre para acessar a agenda da casa.', 401);
         if (req.method === 'GET' && path === '/api/state') return view(user);
