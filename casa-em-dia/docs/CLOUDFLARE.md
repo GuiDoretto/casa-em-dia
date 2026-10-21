@@ -185,7 +185,7 @@ O workflow instala as dependências pelo lockfile, executa os testes e o runtime
 A configuração de credenciais é feita uma vez:
 
 1. No GitHub, abra **Settings → Environments** e crie `cloudflare-production`. Permita publicações somente da branch `main`, sem revisores obrigatórios nesse environment para o deploy seguir automaticamente após o merge.
-2. Na Cloudflare, crie um API token pelo modelo **Edit Cloudflare Workers**, limitado à conta de destino. Guarde-o como secret `CLOUDFLARE_API_TOKEN` nesse environment. Não use a senha do site nem o token OAuth temporário do login Wrangler.
+2. Na Cloudflare, crie um API token pelo modelo **Edit Cloudflare Workers**, limitado à conta de destino. Guarde-o como secret `CLOUDFLARE_API_TOKEN` nesse environment. O workflow também aceita `API_CASA_EM_DIA`, nome usado na configuração atual. Não use a senha do site nem o token OAuth temporário do login Wrangler.
 3. Copie o ID da conta Cloudflare para a variable `CLOUDFLARE_ACCOUNT_ID` no mesmo environment. Esse identificador não é uma senha; o workflow também aceita o secret legado com o mesmo nome.
 4. Faça merge de um PR e acompanhe **Actions → Publicar na Cloudflare**. O deploy só recebe as credenciais nas etapas de validação e publicação.
 

@@ -71,15 +71,15 @@ jobs:
       - name: Validar credenciais de publicação
         if: steps.revision.outputs.publish == 'true'
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.API_CASA_EM_DIA }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Configure CLOUDFLARE_API_TOKEN no environment cloudflare-production.'; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Configure CLOUDFLARE_API_TOKEN ou API_CASA_EM_DIA no environment cloudflare-production.'; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Configure a variable CLOUDFLARE_ACCOUNT_ID no environment cloudflare-production.'; exit 1; }
       - name: Publicar código e assets
         if: steps.revision.outputs.publish == 'true'
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.API_CASA_EM_DIA }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npm run deploy:cloudflare
       - name: Conferir acesso ao site publicado
