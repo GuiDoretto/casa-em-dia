@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createHouseApplication } from '../application.mjs';
+import { provisionAdministrator } from '../administrator.mjs';
 import { createDurableSqliteDatabase, createPersistentRateLimiter } from './sqlite-adapter.mjs';
 import { createFetchPushClient } from './push-client.mjs';
 import { nodeRequest, readJson, securityHeaders, withSecurity } from './http.mjs';
@@ -16,6 +17,9 @@ export class CasaDatabase extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.runtimeEnv = { ...env, CASA_TRUST_PROXY: '1' };
+    // Binding-only updates can reuse an instance. Bootstrap uses the current
+    // entrypoint environment through internal RPC instead of this snapshot.
+    delete this.runtimeEnv.CASA_ADMIN_BOOTSTRAP;
     this.db = createDurableSqliteDatabase(ctx.storage);
     this.pushClient = createFetchPushClient();
     this.db.transaction(() => {
@@ -28,6 +32,11 @@ export class CasaDatabase extends DurableObject {
 
   createApplication() {
     this.application = this.buildApplication();
+  }
+
+  ensureAdministrator(credential) {
+    if (this.env.CASA_MIGRATION_ENABLED === '1') return false;
+    return provisionAdministrator(this.db, credential);
   }
 
   buildApplication() {
@@ -119,7 +128,14 @@ export class CasaDatabase extends DurableObject {
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
-    if (path.startsWith('/api/') || path.startsWith('/__admin/')) return env.CASA.getByName('principal').fetch(request);
+    if (path.startsWith('/api/') || path.startsWith('/__admin/')) {
+      const casa = env.CASA.getByName('principal');
+      if (path === '/api/login' && request.method === 'POST' && env.CASA_ADMIN_BOOTSTRAP && env.CASA_MIGRATION_ENABLED !== '1') {
+        try { await casa.ensureAdministrator(env.CASA_ADMIN_BOOTSTRAP); }
+        catch (error) { return withSecurity(errorResponse(error), request); }
+      }
+      return casa.fetch(request);
+    }
     if (!['GET', 'HEAD'].includes(request.method)) return withSecurity(Response.json({ error: 'Método não permitido.' }, { status: 405 }), request);
     const response = await env.ASSETS.fetch(request);
     const headers = securityHeaders(response.headers, new URL(request.url).protocol === 'https:');

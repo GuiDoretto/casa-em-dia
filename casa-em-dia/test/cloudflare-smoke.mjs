@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { scryptSync } from 'node:crypto';
+import { randomBytes, scryptSync } from 'node:crypto';
 import { createServer } from 'node:net';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,12 +35,13 @@ async function stop() {
   child = null;
 }
 
-async function start(name, migration) {
+async function start(name, migration, bootstrap = '') {
   await stop();
   const port = await freePort(), base = 'http://127.0.0.1:' + port;
   const envFile = join(temporary, 'test.env');
   writeFileSync(envFile, [
     'CASA_SETUP_TOKEN=' + setupToken, 'CASA_MIGRATION_TOKEN=' + migrationToken,
+    'CASA_ADMIN_BOOTSTRAP=' + bootstrap,
     'CASA_MIGRATION_ENABLED=' + Number(migration), 'CASA_SCHEDULE_ENABLED=0',
     'CASA_SMS_ENABLED=0', 'BREVO_API_KEY=', 'BREVO_FROM_EMAIL=', 'CASA_PUBLIC_URL=',
   ].join('\n'), { mode: 0o600 });
@@ -51,7 +52,7 @@ async function start(name, migration) {
     '--log-level', 'error', '--show-interactive-dev-session=false',
   ], {
     cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: 'true', CLOUDFLARE_API_TOKEN: '', CF_API_TOKEN: '', BREVO_API_KEY: '', BREVO_FROM_EMAIL: '', CASA_SMS_ENABLED: '0' },
+    env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: 'true', CLOUDFLARE_API_TOKEN: '', CF_API_TOKEN: '', BREVO_API_KEY: '', BREVO_FROM_EMAIL: '', CASA_SMS_ENABLED: '0', CASA_ADMIN_BOOTSTRAP: '' },
   });
   let diagnostic = '';
   child.stdout.on('data', value => { diagnostic = (diagnostic + value).slice(-6000); });
@@ -188,6 +189,61 @@ try {
   ok(await call(base, 'login', { email: 'bruno@worker.test', password: 'Senha Bruno 2026!' }), 'member password');
   assert.equal(ok(await call(base, 'state', undefined, cookie), 'persisted state').data.user.id, adminId);
   console.log('OK workerd: backup integral, hashes das 13 tabelas, importação atômica, VAPID original, fotos e senhas após reinício.');
+
+  // Provision only the new account in the imported disposable household.
+  // The password is generated for this test and never comes from the workspace.
+  const bootstrapPassword = randomBytes(32).toString('base64url');
+  const bootstrapSalt = randomBytes(16).toString('hex');
+  const bootstrap = JSON.stringify({ salt: bootstrapSalt, digest: scryptSync(bootstrapPassword, bootstrapSalt, 64).toString('hex') });
+  base = await start('target', false, bootstrap);
+  const beforeAdminLogin = ok(await call(base, 'state', undefined, cookie), 'bootstrap before internal provisioning').data;
+  assert.deepEqual(beforeAdminLogin.users, login.data.users);
+  assert.equal(beforeAdminLogin.users.some(user => user.id === 'admin'), false);
+  assert.deepEqual(beforeAdminLogin.tasks, before.tasks);
+  const provisioned = ok(await call(base, 'login', { email: 'admin', password: bootstrapPassword }), 'bootstrap admin login');
+  assert.equal(provisioned.data.user.id, 'admin');
+  assert.equal(provisioned.data.user.role, 'admin');
+  assert.match(provisioned.cookie, /^casa_session=/);
+  assert.match(provisioned.headers.get('Set-Cookie'), /HttpOnly.*SameSite=Strict/);
+  assert.equal(provisioned.data.users.length, login.data.users.length + 1);
+  assert.deepEqual(provisioned.data.users.filter(user => user.id !== 'admin'), login.data.users);
+  assert.deepEqual(provisioned.data.tasks, before.tasks);
+  assert.equal((await call(base, 'login', { email: 'admin', password: randomBytes(32).toString('base64url') })).status, 401);
+  ok(await call(base, 'export', undefined, provisioned.cookie), 'bootstrap admin export');
+
+  base = await start('target', false);
+  const persistedAdmin = ok(await call(base, 'login', { email: 'admin', password: bootstrapPassword }), 'admin after removing bootstrap');
+  assert.equal(persistedAdmin.data.user.id, 'admin');
+  assert.equal(persistedAdmin.data.user.role, 'admin');
+  assert.equal(persistedAdmin.data.users.length, login.data.users.length + 1);
+  assert.deepEqual(persistedAdmin.data.tasks, before.tasks);
+  const founderAfterBootstrap = ok(await call(base, 'login', { email: setup.email, password: setup.password }), 'founder after bootstrap');
+  assert.equal(founderAfterBootstrap.data.user.id, adminId);
+  assert.deepEqual(founderAfterBootstrap.data.tasks, before.tasks);
+  const memberAfterBootstrap = ok(await call(base, 'login', { email: 'bruno@worker.test', password: 'Senha Bruno 2026!' }), 'member after bootstrap');
+  assert.equal(memberAfterBootstrap.data.user.id, memberId);
+
+  if (process.argv.includes('--browser')) {
+    const { chromium } = await import('playwright');
+    browser = await chromium.launch({ headless: true, channel: process.env.CASA_BROWSER_CHANNEL || 'chrome' });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(base);
+    const loginInput = page.locator('input[name=email]');
+    assert.equal(await loginInput.getAttribute('type'), 'text');
+    await loginInput.fill('admin');
+    await page.locator('input[name=password]').fill(bootstrapPassword);
+    await page.locator('form button[type=submit]').click();
+    await page.getByRole('heading', { name: 'Tudo em dia, casa leve.' }).waitFor();
+    await page.getByRole('navigation', { name: 'Menu principal' }).getByRole('button', { name: 'Moradores', exact: true }).click();
+    const addResident = page.getByRole('button', { name: 'Adicionar morador', exact: true });
+    assert.equal(await addResident.isVisible(), true);
+    assert.equal(await addResident.isEnabled(), true);
+    assert.deepEqual(errors, []);
+    await browser.close(); browser = null;
+  }
+  console.log('OK workerd: admin provisionado uma única vez, permissões de administração e login persistente sem bootstrap, preservando moradores e tarefas.');
 } finally {
   await browser?.close();
   await stop();
