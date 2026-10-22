@@ -2,6 +2,7 @@ import webpush from 'web-push';
 
 // Reuse the maintained library for RFC8291/VAPID; only replace Node's HTTPS
 // transport with Fetch. Requests never follow a redirect with push credentials.
+// Workers accepts manual/follow; non-success statuses are rejected below.
 export function createFetchPushClient(fetchImpl = globalThis.fetch) {
   return {
     async sendNotification(subscription, payload, options) {
@@ -10,7 +11,7 @@ export function createFetchPushClient(fetchImpl = globalThis.fetch) {
         method: details.method,
         headers: details.headers,
         body: details.body,
-        redirect: 'error',
+        redirect: 'manual',
         signal: AbortSignal.timeout(options.timeout || 10000),
       });
       try { await response.body?.cancel(); } catch {}

@@ -100,7 +100,9 @@ export function createNotifications({ db, settings, now = localNow, env = proces
             path = 'transactionalSMS/send'; body = { sender: env.BREVO_SMS_SENDER, recipient, type: 'transactional', content: (isTest ? 'Casa em Dia: teste de SMS.' : `Casa em Dia: voce tem ${count} atividade(s) pendente(s). Abra sua agenda para conferir.`).slice(0, 150) };
         }
         let response;
-        try { response = await fetchImpl('https://api.brevo.com/v3/' + path, { method: 'POST', headers: { 'api-key': env.BREVO_API_KEY, 'content-type': 'application/json', 'accept': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000), redirect: 'error' }); }
+        // Workers supports manual/follow redirects. Reject 3xx below without
+        // forwarding the API key or message to another endpoint.
+        try { response = await fetchImpl('https://api.brevo.com/v3/' + path, { method: 'POST', headers: { 'api-key': env.BREVO_API_KEY, 'content-type': 'application/json', 'accept': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000), redirect: 'manual' }); }
         catch { throw resultError('Não foi possível confirmar o envio com o serviço. Confira antes de testar novamente.', { uncertain: true }); }
         if (!response.ok) { const code = Number(response.status); try { await response.body?.cancel(); } catch { } throw resultError(code === 429 ? 'Limite do serviço atingido. Aguarde antes de tentar novamente.' : 'O serviço de envio rejeitou a solicitação. Confira a configuração.', { retry: code === 429, uncertain: code >= 500 }); }
         try { await response.body?.cancel(); } catch { }
