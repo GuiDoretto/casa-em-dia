@@ -3,7 +3,9 @@
   "name": "casa-em-dia",
   "main": "cloudflare/worker.mjs",
   "compatibility_date": "2026-10-20",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "workers_dev": true,
   "preview_urls": false,
   "assets": {
@@ -13,19 +15,32 @@
   },
   "durable_objects": {
     "bindings": [
-      { "name": "CASA", "class_name": "CasaDatabase" }
+      {
+        "name": "CASA",
+        "class_name": "CasaDatabase"
+      }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["CasaDatabase"] }
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "CasaDatabase"
+      ]
+    }
   ],
   "vars": {
+    "BREVO_API_KEY": "cfat\\_Ah2JzLXsUzxEALVhQbatpHZbnbICoIx16EQbThPP763908b0",
+    "BREVO_FROM_EMAIL": "guii.doreto@gmail.com",
+    "BREVO_FROM_NAME": "Casa em Dia",
+    "CASA_MIGRATION_ENABLED": "0",
+    "CASA_PUBLIC_URL": "https://casa-em-dia.casa-em-dia.workers.dev/",
     "CASA_SCHEDULE_ENABLED": "1",
-    "CASA_MIGRATION_ENABLED": "1",
-    "CASA_SMS_ENABLED": "1",
-    "BREVO_FROM_NAME": "Casa em Dia"
+    "CASA_SMS_ENABLED": "1"
   },
   "triggers": {
-    "crons": ["* * * * *"]
+    "crons": [
+      "* * * * *"
+    ]
   }
 }
