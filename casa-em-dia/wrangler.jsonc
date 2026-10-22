@@ -21,8 +21,8 @@
   ],
   "vars": {
     "CASA_SCHEDULE_ENABLED": "1",
-    "CASA_MIGRATION_ENABLED": "0",
-    "CASA_SMS_ENABLED": "0",
+    "CASA_MIGRATION_ENABLED": "1",
+    "CASA_SMS_ENABLED": "1",
     "BREVO_FROM_NAME": "Casa em Dia"
   },
   "triggers": {
