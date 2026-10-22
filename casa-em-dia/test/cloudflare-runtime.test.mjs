@@ -159,7 +159,7 @@ test('Web Push usa criptografia VAPID real e Fetch com corpo cifrado, prazo e re
   const { url, init } = sent[0], headers = new Headers(init.headers);
   assert.equal(url, subscription.endpoint);
   assert.equal(init.method, 'POST');
-  assert.equal(init.redirect, 'error');
+  assert.equal(init.redirect, 'manual');
   assert.ok(init.signal instanceof AbortSignal);
   assert.equal(headers.get('TTL'), '3600');
   assert.equal(headers.get('Content-Encoding'), 'aes128gcm');
@@ -182,7 +182,7 @@ test('Web Push propaga status sem conteúdo privado, cancela resposta e não seg
   assert.equal(cancelled, 1);
   const redirect = createFetchPushClient(async (url, init) => {
     calls++;
-    assert.equal(init.redirect, 'error');
+    assert.equal(init.redirect, 'manual');
     return new Response(null, { status: 302, headers: { Location: 'https://untrusted.example.test/' } });
   });
   await assert.rejects(redirect.sendNotification(subscription, 'teste', options), { statusCode: 302 });

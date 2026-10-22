@@ -64,7 +64,7 @@ test('scheduler respects preferences, quiet hours and São Paulo timezone, and i
  f.api.savePreferences('ana',prefs());f.at('07:59');await f.api.tick();assert.equal(f.calls.length,0);
  f.at('08:59');await f.api.tick();assert.equal(f.calls.length,0);
  f.at('09:00');await f.api.tick();assert.equal(f.calls.length,1);
- const mail=f.calls[0];assert.equal(mail.url,'https://api.brevo.com/v3/smtp/email');assert.equal(mail.redirect,'error');assert.equal(mail.headers['api-key'],'test-secret');assert.equal(mail.body.to[0].email,'ana@example.test');
+ const mail=f.calls[0];assert.equal(mail.url,'https://api.brevo.com/v3/smtp/email');assert.equal(mail.redirect,'manual');assert.equal(mail.headers['api-key'],'test-secret');assert.equal(mail.body.to[0].email,'ana@example.test');
  assert.match(mail.body.textContent,/2 atividades/);assert.match(mail.body.textContent,/Limpar cozinha/);assert.match(mail.body.textContent,/Cuidar sala/);assert.doesNotMatch(mail.body.textContent,/Futuro|Concluida|Pausada/);assert.match(mail.body.textContent,/https:\/\/casa.example.test/);
  assert.equal(f.api.status('ana').recent[0].status,'accepted');
  f.at('21:00','2026-10-20');await f.api.tick();assert.equal(f.calls.length,1);
@@ -103,6 +103,30 @@ test('uncertain email/SMS outcomes never resend automatically and provider error
  let calls=0;const f=fixture(t,{fetchImpl:async()=>{calls++;throw new Error('secret-key recipient@example.test 5511999991234');}});f.api.savePreferences('ana',prefs(true,true));
  await f.api.tick();assert.equal(calls,2);f.at('10:00');await f.api.tick();await f.restart();await f.api.tick();assert.equal(calls,2);
  const recent=JSON.stringify(f.api.status('ana').recent);assert.match(recent,/uncertain/);assert.doesNotMatch(recent,/secret-key|recipient@example|5511999991234/);
+});
+
+test('email and SMS reject redirects without following or accepting the response',async t=>{
+ const calls=[];
+ const f=fixture(t,{fetchImpl:async(url,init)=>{
+  calls.push(url);assert.equal(init.redirect,'manual');
+  return new Response(null,{status:302,headers:{Location:'https://untrusted.example.test/private-redirect'}});
+ }});
+ for(const channel of ['email','sms']) {
+  await assert.rejects(f.api.sendTest('ana',channel),{status:502});
+  const recent=f.api.status('ana').recent.find(row=>row.channel===channel);
+  assert.equal(recent.status,'failed');
+  assert.doesNotMatch(recent.error,/untrusted|private-redirect|test-secret/);
+ }
+ assert.deepEqual(calls,['https://api.brevo.com/v3/smtp/email','https://api.brevo.com/v3/transactionalSMS/send']);
+});
+
+test('push transport exceptions without HTTP status remain uncertain and sanitized',async t=>{
+ const f=fixture(t,{pushClient:{sendNotification:async()=>{throw new TypeError('private-endpoint private-auth');}}});
+ const sub=subscription();f.api.subscribe('ana',sub);
+ await assert.rejects(f.api.sendTest('ana','push',sub.endpoint),{status:502});
+ const recent=f.api.status('ana').recent[0];
+ assert.equal(recent.status,'uncertain');
+ assert.doesNotMatch(recent.error,/private-endpoint|private-auth/);
 });
 
 test('test dispatch stays on own contact, returns provider acceptance, and persists one-minute cooldown',async t=>{
