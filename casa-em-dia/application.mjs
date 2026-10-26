@@ -5,6 +5,7 @@ import { createPhotoStore } from './profile-photos.mjs';
 import { createNotifications } from './notifications.mjs';
 import { ALL_WEEKDAYS, templateWeekdays, templateEligible, addDays, startOfWeek, requestedDates, planWeeklySlots } from './scheduling.mjs';
 import { ADMIN_USER_ID, provisionAdministrator } from './administrator.mjs';
+import { createFinances } from './house-finances.mjs';
 
 // Shared synchronous application core. The host owns storage and HTTP lifecycle.
 // A supplied transaction must execute the callback synchronously and roll it back on error.
@@ -34,6 +35,7 @@ export function createHouseApplication({ db, env = process.env, setupToken = ran
     const all = (sql, ...args) => db.prepare(sql).all(...args);
     const run = (sql, ...args) => db.prepare(sql).run(...args);
     const profilePhotos = createPhotoStore(db, fail);
+    const finances = createFinances({ db, uid, fail, requireAdmin, activeUser });
     const settings = () => ({ ...defaultSettings, ...JSON.parse(one('SELECT value FROM settings WHERE id=1')?.value || '{}') });
     const configured = () => !!one('SELECT id FROM users LIMIT 1');
     const notifications = createNotifications({ ...notificationOptions, db, settings, env });
@@ -63,7 +65,7 @@ export function createHouseApplication({ db, env = process.env, setupToken = ran
     function view(user) {
         const s = settings(); const now = localNow();
         const users = (user.role === 'admin' ? all('SELECT id,name,email,phone,role,active,password_hash IS NOT NULL AS registered FROM users ORDER BY name') : all('SELECT id,name,role,active FROM users ORDER BY name')).map(person => ({ ...person, photo_url: profilePhotos.photoUrl(person.id) }));
-        return { notifications: notifications.status(user.id), archivedCalendars: user.role === 'admin' ? all('SELECT id,archived_at,archived_by,task_count,swap_count FROM calendar_archives ORDER BY archived_at DESC') : undefined, user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, photo_url: profilePhotos.photoUrl(user.id) }, users, tasks: all('SELECT * FROM tasks ORDER BY due_date,deadline,title'), templates: all('SELECT * FROM templates ORDER BY title').map(template => ({ ...template, weekdays: templateWeekdays(template) })), swaps: all('SELECT * FROM swaps ORDER BY created_at DESC'), settings: s, holidays: nationalHolidays(Number(now.date.slice(0, 4))), now };
+        return { ...finances.view(user), notifications: notifications.status(user.id), archivedCalendars: user.role === 'admin' ? all('SELECT id,archived_at,archived_by,task_count,swap_count FROM calendar_archives ORDER BY archived_at DESC') : undefined, user: { id: user.id, name: user.name, email: user.email, phone: user.phone, role: user.role, photo_url: profilePhotos.photoUrl(user.id) }, users, tasks: all('SELECT * FROM tasks ORDER BY due_date,deadline,title'), templates: all('SELECT * FROM templates ORDER BY title').map(template => ({ ...template, weekdays: templateWeekdays(template) })), swaps: all('SELECT * FROM swaps ORDER BY created_at DESC'), settings: s, holidays: nationalHolidays(Number(now.date.slice(0, 4))), now };
     }
     function generate(dates) {
         const s = settings(), people = all('SELECT id FROM users WHERE active=1 ORDER BY id'), templates = all('SELECT * FROM templates WHERE active=1');
@@ -102,9 +104,16 @@ export function createHouseApplication({ db, env = process.env, setupToken = ran
             results.push(taskById(id));
         }
         return { created: results, skipped };
-    } function synchronizePaused(s) {
+    }
+    function cancelUnavailableSwaps() {
+        for (const swap of all("SELECT * FROM swaps WHERE status='pending'")) {
+            const a = taskById(swap.task_a), b = taskById(swap.task_b);
+            if (!swappable(a) || !swappable(b) || a.assignee_id !== swap.requester_id || b.assignee_id !== swap.recipient_id) run("UPDATE swaps SET status='cancelled',resolved_at=? WHERE id=?", new Date().toISOString(), swap.id);
+        }
+    }
+    function synchronizePaused(s) {
         for (const t of all("SELECT * FROM tasks WHERE status IN ('pending','paused') AND due_date>=?", localNow().date)) run('UPDATE tasks SET status=? WHERE id=?', offReason(t.due_date, s) ? 'paused' : 'pending', t.id);
-        for (const swap of all("SELECT * FROM swaps WHERE status='pending'")) if (!swappable(taskById(swap.task_a)) || !swappable(taskById(swap.task_b))) run("UPDATE swaps SET status='cancelled',resolved_at=? WHERE id=?", new Date().toISOString(), swap.id);
+        cancelUnavailableSwaps();
     }
     async function body(req, limit = 16384) { let raw = ''; for await (const chunk of req) { raw += chunk; if (Buffer.byteLength(raw) > limit) fail('Solicitação muito grande.', 413); } try { return JSON.parse(raw || '{}'); } catch { fail('Dados inválidos.'); } }
     const attempts = new Map();
@@ -155,6 +164,7 @@ export function createHouseApplication({ db, env = process.env, setupToken = ran
         if (req.method !== 'POST') fail('Página não encontrada.', 404);
         return transaction(() => {
             let extra = {};
+            if (finances.handle(path, b, user)) return view(user);
             if (path === '/api/profile-photo') {
                 const target = b.userId === undefined ? user.id : text(b.userId, 'Morador', 100);
                 if (target !== user.id) requireAdmin(user);
@@ -179,14 +189,31 @@ export function createHouseApplication({ db, env = process.env, setupToken = ran
                 if (b.month && b.week) fail('Escolha sortear a semana ou o mês.'); const dates = requestedDates(d, { month: !!b.month, week: !!b.week });
                 extra = generate(dates);
             } else if (path === '/api/swap') {
-                const a = taskById(b.taskA), c = taskById(b.taskB); if (a.assignee_id !== user.id || c.assignee_id === user.id) fail('Escolha uma atividade sua e uma de outro morador.', 403); activeUser(c.assignee_id); if (a.due_date.slice(0, 7) !== c.due_date.slice(0, 7)) fail('As atividades precisam pertencer ao mesmo mês.'); if (!swappable(a) || !swappable(c)) fail('Só é possível trocar atividades pendentes dentro do prazo.'); if (one("SELECT id FROM swaps WHERE status='pending' AND (task_a IN (?,?) OR task_b IN (?,?))", a.id, c.id, a.id, c.id)) fail('Uma das atividades já tem um pedido de troca pendente.', 409); run('INSERT INTO swaps(id,task_a,task_b,requester_id,recipient_id,created_at) VALUES(?,?,?,?,?,?)', uid(), a.id, c.id, user.id, c.assignee_id, new Date().toISOString());
+                const a = taskById(text(b.taskA, 'Sua atividade', 100)), c = taskById(text(b.taskB, 'Atividade do outro morador', 100));
+                if (a.assignee_id !== user.id || c.assignee_id === user.id) fail('Escolha uma atividade sua e uma de outro morador.', 403);
+                activeUser(c.assignee_id);
+                if (a.due_date.slice(0, 7) !== c.due_date.slice(0, 7)) fail('As atividades precisam pertencer ao mesmo mês.');
+                if (!swappable(a) || !swappable(c)) fail('Só é possível trocar atividades pendentes dentro do prazo.');
+                cancelUnavailableSwaps();
+                if (one("SELECT id FROM swaps WHERE status='pending' AND (task_a IN (?,?) OR task_b IN (?,?))", a.id, c.id, a.id, c.id)) fail('Uma das atividades já tem um pedido de troca pendente.', 409);
+                run('INSERT INTO swaps(id,task_a,task_b,requester_id,recipient_id,created_at) VALUES(?,?,?,?,?,?)', uid(), a.id, c.id, user.id, c.assignee_id, new Date().toISOString());
             } else if (path === '/api/resolve-swap') {
                 const s = one('SELECT * FROM swaps WHERE id=?', b.id); if (!s || s.status !== 'pending') fail('Este pedido já foi resolvido.', 409); if (!['accepted', 'rejected', 'cancelled'].includes(b.action)) fail('Resposta inválida.'); if (b.action === 'cancelled' ? s.requester_id !== user.id : s.recipient_id !== user.id) fail('Você não pode responder a este pedido.', 403);
                 if (b.action === 'accepted') { const a = taskById(s.task_a), c = taskById(s.task_b); if (a.assignee_id !== s.requester_id || c.assignee_id !== s.recipient_id || !swappable(a) || !swappable(c)) fail('As atividades mudaram ou saíram do prazo. Peça uma nova troca.', 409); activeUser(a.assignee_id); activeUser(c.assignee_id); run('UPDATE tasks SET assignee_id=? WHERE id=?', c.assignee_id, a.id); run('UPDATE tasks SET assignee_id=? WHERE id=?', a.assignee_id, c.id); }
                 run('UPDATE swaps SET status=?,resolved_at=? WHERE id=?', b.action, new Date().toISOString(), s.id);
             } else if (path === '/api/save-user') {
                 requireAdmin(user); const id = b.id || uid(), name = text(b.name, 'Nome', 70), mail = email(b.email), tel = phone(b.phone || ''); const existing = one('SELECT * FROM users WHERE id=?', id); if (one('SELECT id FROM users WHERE email=? AND id!=?', mail, id)) fail('Este e-mail já está cadastrado.');
-                if (existing) { if (id === user.id && b.active === false) fail('Você não pode desativar a própria conta.'); if (b.active === false && one("SELECT id FROM tasks WHERE assignee_id=? AND status IN ('pending','paused') LIMIT 1", id)) fail('Reatribua as atividades pendentes deste morador antes de desativá-lo.'); run('UPDATE users SET name=?,email=?,phone=?,active=? WHERE id=?', name, mail, tel, b.active === false ? 0 : 1, id); if (!b.active) run('DELETE FROM sessions WHERE user_id=?', id); } else { run('INSERT INTO users(id,name,email,phone) VALUES(?,?,?,?)', id, name, mail, tel); }
+                if (b.isAdmin !== undefined && typeof b.isAdmin !== 'boolean') fail('Informe se o morador será administrador.');
+                const role = b.isAdmin === undefined ? existing?.role || 'member' : b.isAdmin ? 'admin' : 'member';
+                if (existing) {
+                    if (id === ADMIN_USER_ID && role !== 'admin') fail('A conta administrativa de recuperação deve manter o acesso de administrador.');
+                    if (id === user.id && b.active === false) fail('Você não pode desativar a própria conta.');
+                    if (existing.role === 'admin' && existing.active && (role !== 'admin' || b.active === false) && !one("SELECT id FROM users WHERE id!=? AND role='admin' AND active=1 AND password_hash IS NOT NULL LIMIT 1", id)) fail('Mantenha ao menos um administrador ativo com acesso já configurado.');
+                    if (b.active === false && one("SELECT id FROM tasks WHERE assignee_id=? AND status IN ('pending','paused') LIMIT 1", id)) fail('Reatribua as atividades pendentes deste morador antes de desativá-lo.');
+                    run('UPDATE users SET name=?,email=?,phone=?,active=?,role=? WHERE id=?', name, mail, tel, b.active === false ? 0 : 1, role, id);
+                    if (b.active === false) run('DELETE FROM sessions WHERE user_id=?', id);
+                } else { run('INSERT INTO users(id,name,email,phone,role) VALUES(?,?,?,?,?)', id, name, mail, tel, role); }
+                if (existing && b.active === false) run('UPDATE rooms SET resident_id=NULL WHERE resident_id=?', id);
                 if (existing) notifications.contactChanged(id, { emailChanged: mail !== existing.email, phoneChanged: tel !== existing.phone, deactivated: b.active === false });
                 if (!existing) { const token = randomBytes(24).toString('hex'); run('UPDATE users SET invite_hash=?,invite_expires=? WHERE id=?', hash(token), Date.now() + 7 * 86400000, id); extra = { inviteToken: token }; }
             } else if (path === '/api/invite') {
@@ -211,7 +238,7 @@ export function createHouseApplication({ db, env = process.env, setupToken = ran
         if (!configured()) return;
         try {
             transaction(() => {
-                for (const swap of all("SELECT * FROM swaps WHERE status='pending'")) if (!swappable(taskById(swap.task_a)) || !swappable(taskById(swap.task_b))) run("UPDATE swaps SET status='cancelled',resolved_at=? WHERE id=?", new Date().toISOString(), swap.id);
+                cancelUnavailableSwaps();
                 if (settings().autoGenerate) generate([localNow().date]);
             });
         } catch (error) { console.error('Geração diária:', error.message); }

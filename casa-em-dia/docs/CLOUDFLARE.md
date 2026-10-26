@@ -196,7 +196,7 @@ Referência: [Cloudflare com GitHub Actions](https://developers.cloudflare.com/w
 
 ## Fazer um backup completo da instalação online
 
-O download inclui as 13 tabelas da aplicação, fotos, hashes das senhas, sessões e chaves das notificações. Guarde-o fora do Git e proteja o acesso ao arquivo.
+O download em formato v2 inclui as 16 tabelas da aplicação, com quartos, despesas, cobranças, fotos, hashes das senhas, sessões e chaves das notificações. Guarde-o fora do Git e proteja o acesso ao arquivo. Backups anteriores em formato v1 continuam aceitos: seus hashes são conferidos e as três tabelas financeiras começam vazias na restauração.
 
 1. Combine uma janela curta de manutenção. Gere/cadastre `CASA_MIGRATION_TOKEN` com pelo menos 32 caracteres e atualize seu `.env.migration` local com o mesmo token.
 2. Mude `CASA_MIGRATION_ENABLED` para `"1"` em `wrangler.jsonc` e publique. Mantenha os demais valores atuais, incluindo a escolha de agendamento: o modo de manutenção já bloqueia o Cron e as escritas públicas temporariamente.

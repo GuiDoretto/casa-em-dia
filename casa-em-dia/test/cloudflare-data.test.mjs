@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import webpush from 'web-push';
 import { createHouseApplication } from '../application.mjs';
@@ -39,7 +40,21 @@ function filled(t) {
   insert(db, 'notification_preferences', ['admin', 1, 0, '10:30']);
   insert(db, 'notification_subscriptions', ['https://push.example.test/device', 'admin', '{"endpoint":"https://push.example.test/device","keys":{"auth":"private"}}', 1792500000000]);
   insert(db, 'notification_deliveries', ['delivery', '2026-10-19:admin:email:daily', 'admin', 'email', '', 'uncertain', 1792500000000, 1792500001000, 1, 0, 'Resultado incerto.', 'reminder']);
+  insert(db, 'rooms', ['room-1', 'Quarto 1', 95000, 'Suíte com varanda', 'admin']);
+  insert(db, 'rooms', ['room-2', 'Quarto 2', 120000, 'Janela para o jardim', null]);
+  insert(db, 'monthly_expenses', ['expense', '2026-10', 'Água', 12345]);
+  insert(db, 'monthly_bills', ['bill', '2026-10', 'admin', 'Ana "Água"', 'Quarto 1', 95000, 12345, 107345, '[{"description":"Água","amount_cents":12345}]', '2026-10-26T12:00:00.000Z']);
   return db;
+}
+
+function legacySnapshot(snapshot) {
+  const tables = structuredClone(snapshot.manifest.tables.slice(0, 13));
+  return {
+    format: 'casa-em-dia.snapshot.v1',
+    createdAt: snapshot.createdAt,
+    tables: structuredClone(snapshot.tables.slice(0, 13)),
+    manifest: { format: 'casa-em-dia.manifest.v1', tables, sha256: createHash('sha256').update(JSON.stringify(tables)).digest('hex') },
+  };
 }
 
 function transaction(db) {
@@ -50,10 +65,11 @@ function transaction(db) {
   };
 }
 
-test('snapshot preserva as 13 tabelas, binários, nulos, credenciais e estado de entregas', t => {
+test('snapshot preserva as 16 tabelas, quartos, contas, binários, credenciais e entregas', t => {
   const source = filled(t), target = database(t);
   const snapshot = exportSnapshot(source);
-  assert.equal(snapshot.tables.length, 13);
+  assert.equal(snapshot.tables.length, TABLES.length);
+  assert.equal(snapshot.format, 'casa-em-dia.snapshot.v2');
   assert.equal(validateSnapshot(snapshot).counts.users, 2);
   const photo = snapshot.tables.find(table => table.name === 'profile_photos').rows[0];
   assert.deepEqual(photo[2], { $blob: 'AP+ACg0A' });
@@ -63,6 +79,10 @@ test('snapshot preserva as 13 tabelas, binários, nulos, credenciais e estado de
   assert.deepEqual(Buffer.from(target.prepare('SELECT data FROM profile_photos').get().data), Buffer.from([0, 255, 128, 10, 13, 0]));
   assert.equal(target.prepare('SELECT password_hash FROM users WHERE id=?').get('admin').password_hash, 'original-scrypt-hash');
   assert.equal(target.prepare('SELECT status FROM notification_deliveries').get().status, 'uncertain');
+  assert.equal(target.prepare('SELECT features FROM rooms WHERE id=?').get('room-1').features, 'Suíte com varanda');
+  assert.equal(target.prepare('SELECT resident_id FROM rooms WHERE id=?').get('room-2').resident_id, null);
+  assert.equal(target.prepare('SELECT amount_cents FROM monthly_expenses').get().amount_cents, 12345);
+  assert.equal(target.prepare('SELECT total_cents FROM monthly_bills').get().total_cents, 107345);
   assert.deepEqual(target.prepare('PRAGMA foreign_key_check').all(), []);
 });
 
@@ -95,7 +115,7 @@ test('valida integridade, tabelas completas, tipos e referências antes de escre
   modified.tables.find(table => table.name === 'users').rows[0][1] = 'Alterado';
   assert.throws(() => importSnapshot(target, modified, { transaction: transaction(target) }), /SHA-256/);
   const missing = structuredClone(original); missing.tables.pop();
-  assert.throws(() => validateSnapshot(missing), /13 tabelas/);
+  assert.throws(() => validateSnapshot(missing), new RegExp(TABLES.length + ' tabelas'));
   const orphan = structuredClone(original);
   orphan.tables.find(table => table.name === 'tasks').rows[0][7] = 'missing-user';
   assert.throws(() => validateSnapshot(orphan), /Referência órfã/);
@@ -133,7 +153,7 @@ test('recusa linhas grandes sem truncar o arquivo e exige transação explícita
 
 test('recusa JSON e VAPID corrompidos antes de escrever e informa status adequado', t => {
   const target = database(t), snapshot = exportSnapshot(filled(t)), before = getManifest(target);
-  for (const [name, column, invalid] of [['settings', 'value', '{invalid'], ['templates', 'weekdays', '{}'], ['weekly_draw_plans', 'data', '{}'], ['calendar_archives', 'data', '[]'], ['notification_subscriptions', 'subscription', 'null'], ['notification_meta', 'value', '{"publicKey":"invalid","privateKey":"invalid"}']]) {
+  for (const [name, column, invalid] of [['settings', 'value', '{invalid'], ['templates', 'weekdays', '{}'], ['weekly_draw_plans', 'data', '{}'], ['calendar_archives', 'data', '[]'], ['notification_subscriptions', 'subscription', 'null'], ['notification_meta', 'value', '{"publicKey":"invalid","privateKey":"invalid"}'], ['monthly_bills', 'expenses', '{}']]) {
     const corrupt = structuredClone(snapshot), table = corrupt.tables.find(table => table.name === name);
     table.rows[0][table.columns.indexOf(column)] = invalid;
     assert.throws(() => importSnapshot(target, corrupt, { transaction: transaction(target) }), error => error.status === 400 && /JSON|VAPID/.test(error.message));
@@ -160,4 +180,51 @@ test('detecta UNIQUE duplicado e divergência de manifesto por tabela', t => {
   const result = compareManifests(snapshot.manifest, altered);
   assert.equal(result.equal, false);
   assert.ok(result.differences.some(value => value.includes('sessions')));
+});
+
+test('snapshot v1 mantém seus hashes e restaura em esquema v2 com finanças vazias', t => {
+  const snapshot = legacySnapshot(exportSnapshot(filled(t))), target = database(t);
+  const legacyManifest = structuredClone(snapshot.manifest);
+  assert.deepEqual(validateSnapshot(snapshot).manifest, legacyManifest);
+  const restored = importSnapshot(target, snapshot, { transaction: transaction(target) });
+  assert.equal(restored.format, 'casa-em-dia.manifest.v2');
+  assert.deepEqual(restored.tables.slice(0, 13), legacyManifest.tables);
+  assert.equal(compareManifests(legacyManifest, restored).equal, true);
+  assert.equal(compareManifests(restored, legacyManifest).equal, true);
+  for (const name of ['rooms', 'monthly_expenses', 'monthly_bills']) assert.equal(target.prepare(`SELECT count(*) AS n FROM ${name}`).get().n, 0);
+  assert.deepEqual(snapshot.manifest, legacyManifest);
+  const corrupt = structuredClone(snapshot);
+  corrupt.tables.find(table => table.name === 'users').rows[0][1] = 'Alterado';
+  assert.throws(() => validateSnapshot(corrupt), /SHA-256/);
+});
+
+test('compatibilidade v1 nunca ignora finanças existentes nem omissões de v2', t => {
+  const source = filled(t), current = exportSnapshot(source), legacy = legacySnapshot(current);
+  const comparison = compareManifests(legacy.manifest, current.manifest);
+  assert.equal(comparison.equal, false);
+  for (const name of ['rooms', 'monthly_expenses', 'monthly_bills']) assert.ok(comparison.differences.some(message => message.includes(name)));
+  const mislabeledLegacy = structuredClone(legacy); mislabeledLegacy.format = 'casa-em-dia.snapshot.v2';
+  assert.throws(() => validateSnapshot(mislabeledLegacy), /16 tabelas/);
+  const mislabeledCurrent = structuredClone(current); mislabeledCurrent.format = 'casa-em-dia.snapshot.v1';
+  assert.throws(() => validateSnapshot(mislabeledCurrent), /13 tabelas/);
+  const target = database(t);
+  insert(target, 'monthly_expenses', ['existing', '2026-10', 'Internet', 10000]);
+  const before = getManifest(target);
+  assert.throws(() => importSnapshot(target, legacy, { transaction: transaction(target) }), /destino contém registros em monthly_expenses/);
+  assert.deepEqual(getManifest(target), before);
+});
+
+test('quartos e cobranças validam referências e unicidade antes de restaurar', t => {
+  const snapshot = exportSnapshot(filled(t));
+  for (const [name, column] of [['rooms', 'resident_id'], ['monthly_bills', 'user_id']]) {
+    const invalid = structuredClone(snapshot), table = invalid.tables.find(table => table.name === name);
+    table.rows[0][table.columns.indexOf(column)] = 'missing-user';
+    assert.throws(() => validateSnapshot(invalid), /Referência órfã/);
+  }
+  const duplicateRoom = structuredClone(snapshot), rooms = duplicateRoom.tables.find(table => table.name === 'rooms');
+  rooms.rows[1][rooms.columns.indexOf('name')] = rooms.rows[0][rooms.columns.indexOf('name')].toUpperCase();
+  assert.throws(() => validateSnapshot(duplicateRoom), /UNIQUE duplicada em rooms/);
+  const duplicateBill = structuredClone(snapshot), bills = duplicateBill.tables.find(table => table.name === 'monthly_bills');
+  bills.rows.push([...bills.rows[0]]); bills.rows[1][0] = 'other-bill';
+  assert.throws(() => validateSnapshot(duplicateBill), /UNIQUE duplicada em monthly_bills/);
 });

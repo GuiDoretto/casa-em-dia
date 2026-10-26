@@ -1,12 +1,14 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import AuthScreen from './auth-screen';
-import { Avatar, Brand, Icon } from './ui';
+import { Avatar, Brand, Icon, Modal } from './ui';
 import { HouseContext } from '../lib/house-context';
 import { api, formatDate, localNow } from '../lib/client.mjs';
 import { Dashboard, Calendar, Draw, Residents, Ranking, Swaps } from './views';
 import Admin from './admin';
 import Dialogs from './dialogs';
+import InstallPrompt, { useInstallPrompt } from './install-prompt';
+import { Rooms, Finances } from './rooms-finance';
 
 const PUSH_OWNER_KEY = 'casa-em-dia:push-user';
 function pushUnavailable() {
@@ -34,6 +36,7 @@ function subscriptionKeyMatches(subscription, publicKey) {
 const navigation = [
   ['home', 'home', 'Hoje'], ['calendar', 'calendar', 'Agenda'], ['draw', 'dice', 'Sorteador'],
   ['swaps', 'swap', 'Trocas'], ['people', 'users', 'Moradores'], ['ranking', 'trophy', 'Ranking'],
+  ['rooms', 'bed', 'Quartos'], ['finances', 'calculator', 'Despesas'],
   ['admin', 'settings', 'Administração'],
 ];
 const titles = {
@@ -42,16 +45,20 @@ const titles = {
   draw: ['Dividir para cuidar', 'Um sorteio justo para ninguém ficar sobrecarregado.'],
   swaps: ['Combinado entre vocês', 'Imprevistos acontecem. Troque uma tarefa com outro morador.'],
   people: ['Quem faz a casa', 'Pessoas diferentes, o mesmo cuidado.'],
+  rooms: ['Um espaço para cada um', 'Quartos, valores e diferenciais. Veja quem mora e onde há vagas.'],
+  finances: ['As contas da nossa casa', 'Aluguel de cada quarto e despesas do mês, divididos com clareza.'],
   ranking: ['Cada cuidado conta', 'Celebre quem está fazendo a sua parte.'],
   admin: ['Do jeito da sua casa', 'Ajuste os combinados e organize a rotina da república.'],
 };
 export default function HouseholdApp() {
+  const installation = useInstallPrompt();
   const [state, setState] = useState(null);
   const [view, setView] = useState('home');
   const [now, setNow] = useState(localNow);
   const [selected, setSelected] = useState(() => localNow().date);
   const [month, setMonth] = useState(() => localNow().date.slice(0, 7));
   const [modal, setModal] = useState(null);
+  const [mobileMenu, setMobileMenu] = useState(false);
   const [toast, setToast] = useState('');
   const [busy, setBusy] = useState(false);
   const [connection, setConnection] = useState('');
@@ -68,7 +75,7 @@ export default function HouseholdApp() {
   }, []);
   useEffect(() => () => clearTimeout(toastTimeout.current), []);
   const navigate = useCallback(next => {
-    setView(next); setModal(null); if (next === 'home') setSelected(localNow().date); window.history.replaceState(null, '', '#' + next);
+    setView(next); setModal(null); setMobileMenu(false); if (next === 'home') setSelected(localNow().date); window.history.replaceState(null, '', '#' + next);
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
   useEffect(() => {
@@ -273,6 +280,8 @@ export default function HouseholdApp() {
   const swapCount = state?.swaps.filter(s => s.status === 'pending' && s.recipient_id === state.user.id).length || 0;
   const currentView = !isAdmin && ['admin', 'draw'].includes(view) ? 'home' : view;
   const menu = navigation.filter(([id]) => isAdmin || !['admin', 'draw'].includes(id));
+  const mobilePrimary = menu.filter(([id]) => ['home', 'calendar', 'swaps', 'finances'].includes(id));
+  const mobileExtra = menu.filter(([id]) => !['home', 'calendar', 'swaps', 'finances'].includes(id));
   return <HouseContext.Provider value={context}>
     {!state ? <AuthScreen onAuthenticated={fresh => { setState(fresh); window.history.replaceState(null, '', window.location.pathname + window.location.hash); }} notify={notify} /> :
       <div className="app-shell">
@@ -285,15 +294,17 @@ export default function HouseholdApp() {
           <div className="sidebar-bottom"><div className="care-note"><Icon name="leaf" size={21} /><p>Casa boa é casa<br /><strong>cuidada em conjunto.</strong></p></div><button className="profile-button" onClick={() => setModal({ type: 'profile' })}><Avatar user={state.user} /><span><strong>{state.user.name}</strong><small>{isAdmin ? 'Admin da casa' : 'Morador'}</small></span><Icon name="chevron" size={16} /></button></div>
         </aside>
         <div className="workspace">
-          <header className="topbar"><div className="desktop-breadcrumb">Nossa casa <Icon name="chevron" size={14} /><strong>{navigation.find(([id]) => id === currentView)?.[2]}</strong></div><div className="mobile-brand"><Brand /></div><div className="topbar-actions"><span className="topbar-date">{formatDate(now.date, { weekday: 'long', day: 'numeric', month: 'long' })}</span><button className="icon-btn notification-btn" aria-label={'Notificações: ' + pendingMine.length + ' atividades pendentes'} onClick={() => setModal({ type: 'notifications' })}><Icon name="bell" />{pendingMine.length > 0 && <i />}</button><button className="avatar-button" aria-label="Abrir meu perfil" onClick={() => setModal({ type: 'profile' })}><Avatar user={state.user} /></button></div></header>
+          <header className="topbar"><div className="desktop-breadcrumb">Nossa casa <Icon name="chevron" size={14} /><strong>{navigation.find(([id]) => id === currentView)?.[2]}</strong></div><div className="mobile-brand"><Brand /></div><div className="topbar-actions"><span className="topbar-date">{formatDate(now.date, { weekday: 'long', day: 'numeric', month: 'long' })}</span><button className="icon-btn notification-btn" aria-label={'Notificações: ' + pendingMine.length + ' atividades pendentes e ' + swapCount + ' pedidos de troca'} onClick={() => setModal({ type: 'notifications' })}><Icon name="bell" />{pendingMine.length + swapCount > 0 && <i />}</button><button className="avatar-button" aria-label="Abrir meu perfil" onClick={() => setModal({ type: 'profile' })}><Avatar user={state.user} /></button></div></header>
           {connection && <div className="connection-banner" role="status"><Icon name="clock" size={16} />{connection}</div>}
           <main id="main" className="main">
+            <InstallPrompt installation={installation} />
             <div className="page-heading"><div><p className="eyebrow">{currentView === 'home' ? 'BEM-VINDO À NOSSA ROTINA' : 'CUIDAR É COMPARTILHAR'}</p><h1>{titles[currentView][0]}</h1><p>{titles[currentView][1]}</p></div>{isAdmin && ['home', 'calendar'].includes(currentView) && <button className="btn" onClick={() => setModal({ type: 'task' })}><Icon name="plus" size={17} /><span>Nova atividade</span></button>}</div>
-            {currentView === 'home' && <Dashboard />}{currentView === 'calendar' && <Calendar />}{currentView === 'draw' && <Draw />}{currentView === 'swaps' && <Swaps />}{currentView === 'people' && <Residents />}{currentView === 'ranking' && <Ranking />}{currentView === 'admin' && <Admin />}
+            {currentView === 'home' && <Dashboard />}{currentView === 'calendar' && <Calendar />}{currentView === 'draw' && <Draw />}{currentView === 'swaps' && <Swaps />}{currentView === 'people' && <Residents />}{currentView === 'ranking' && <Ranking />}{currentView === 'admin' && <Admin />}{currentView === 'rooms' && <Rooms />}{currentView === 'finances' && <Finances />}
             <footer className="main-footer"><span><Icon name="leaf" size={14} />Feito para dividir tarefas. E somar cuidado.</span><span>Casa em Dia · A casa é de todos.</span></footer>
           </main>
         </div>
-        <nav className="mobile-nav" aria-label="Menu para celular">{menu.map(([id, icon, title]) => <button key={id} onClick={() => navigate(id)} className={currentView === id ? 'active' : ''} aria-current={currentView === id ? 'page' : undefined}><Icon name={icon} size={21} /><span>{id === 'admin' ? 'Admin' : title}</span>{id === 'swaps' && swapCount > 0 && <b>{swapCount}</b>}</button>)}</nav>
+        <nav className="mobile-nav" aria-label="Menu para celular">{mobilePrimary.map(([id, icon, title]) => <button key={id} onClick={() => navigate(id)} className={currentView === id ? 'active' : ''} aria-current={currentView === id ? 'page' : undefined}><Icon name={icon} size={21} /><span>{title}</span>{id === 'swaps' && swapCount > 0 && <b>{swapCount}</b>}</button>)}<button onClick={() => setMobileMenu(true)} className={mobileExtra.some(([id]) => id === currentView) ? 'active' : ''} aria-expanded={mobileMenu} aria-haspopup="dialog"><Icon name="menu" size={21} /><span>Mais</span></button></nav>
+        {mobileMenu && <Modal title="Mais opções" onClose={() => setMobileMenu(false)}><nav className="mobile-extra-menu" aria-label="Mais opções">{mobileExtra.map(([id, icon, title]) => <button className="btn secondary" key={id} onClick={() => navigate(id)} aria-current={currentView === id ? 'page' : undefined}><Icon name={icon} />{title}</button>)}</nav></Modal>}
         {modal && <Dialogs key={modal.type + (modal.task?.id || modal.template?.id || modal.user?.id || '')} modal={modal} />}
       </div>}
     {toast && <div className="toast" role="status" aria-live="polite"><Icon name="info" size={18} />{toast}<button aria-label="Fechar aviso" onClick={() => setToast('')}><Icon name="close" size={16} /></button></div>}

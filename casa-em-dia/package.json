@@ -18,7 +18,9 @@
     "deploy:cloudflare": "wrangler deploy",
     "secrets:cloudflare": "node scripts/cloudflare-secrets.mjs",
     "test:cloudflare": "node test/cloudflare-smoke.mjs",
-    "test:ui": "node test/ui-smoke.mjs"
+    "test:ui": "node test/ui-smoke.mjs",
+    "test:ui:residents": "node test/resident-ui-smoke.mjs",
+    "test:ui:finances": "node test/finance-ui-smoke.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.57.0",

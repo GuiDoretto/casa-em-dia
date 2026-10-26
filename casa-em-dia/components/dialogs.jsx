@@ -77,15 +77,17 @@ function UserDialog({ modal }) {
   const { state, mutate, closeModal, openModal, notify } = useHouse();
   const user = modal.user || {};
   const self = user.id === state.user.id;
+  const reservedAdmin = user.id === 'admin';
   return <><ProfilePhotoEditor user={user} /><DialogForm submitLabel={user.id ? 'Salvar dados' : 'Cadastrar e criar convite'} onSubmit={async (data, form) => {
     const active = !user.id || self ? true : form.elements.active.checked;
-    const result = await mutate('save-user', { name: data.name, email: data.email, phone: data.phone, ...(user.id ? { id: user.id } : {}), active });
+    const result = await mutate('save-user', { name: data.name, email: data.email, phone: data.phone, ...(user.id ? { id: user.id } : {}), active, isAdmin: reservedAdmin || form.elements.isAdmin.checked });
     if (result.inviteToken) openModal({ type: 'invite', token: result.inviteToken });
     else { closeModal(); notify('Dados do morador atualizados.'); }
   }}>
     <Input label="Nome" name="name" required maxLength={70} autoComplete="name" defaultValue={user.name || ''} />
     <Input label="E-mail" name="email" type="email" required maxLength={254} autoComplete="email" defaultValue={user.email || ''} />
     <Input label="Telefone" name="phone" type="tel" maxLength={30} autoComplete="tel" placeholder="(11) 99999-9999" defaultValue={user.phone || ''} />
+    <label className="check-row"><span><strong>Administrador da casa</strong><small>{reservedAdmin ? 'A conta administrativa de recuperação mantém esse acesso.' : 'Permite gerenciar moradores, quartos, despesas e os combinados da casa.'}</small></span><input type="checkbox" name="isAdmin" defaultChecked={user.role === 'admin'} disabled={reservedAdmin} /></label>
     {user.id && <label className="check-row"><span><strong>Morador ativo</strong><small>{self ? 'Sua própria conta permanece ativa.' : 'Reatribua as tarefas pendentes e pausadas antes de desativar.'}</small></span><input type="checkbox" name={self ? 'selfActive' : 'active'} defaultChecked={Boolean(user.active)} disabled={self} /></label>}
     {(self || !user.id) && <input type="hidden" name="active" value="on" />}
   </DialogForm></>;
@@ -126,20 +128,24 @@ function InviteDialog({ modal }) {
 }
 
 function SwapDialog({ modal }) {
-  const { state, now, mutate, closeModal, notify } = useHouse();
-  const locked = new Set(state.swaps.filter(swap => swap.status === 'pending').flatMap(swap => [swap.task_a, swap.task_b]));
+  const { state, now, mutate, closeModal, navigate, notify } = useHouse();
+  const locked = new Set(state.swaps.filter(swap => swap.status === 'pending' && [swap.task_a, swap.task_b].every(id => swappable(state.tasks.find(task => task.id === id), now))).flatMap(swap => [swap.task_a, swap.task_b]));
   const own = state.tasks.filter(task => task.assignee_id === state.user.id && swappable(task, now) && !locked.has(task.id));
   const [taskA, setTaskA] = useState(modal.task?.id || own[0]?.id || '');
+  const [taskB, setTaskB] = useState('');
   const source = own.find(task => task.id === taskA);
   const options = source ? state.tasks.filter(task => task.assignee_id !== state.user.id && userFor(state, task.assignee_id).active && swappable(task, now) && !locked.has(task.id) && task.due_date.slice(0, 7) === source.due_date.slice(0, 7)) : [];
   if (!source) return <div className="stack"><Empty title="Sem atividades disponíveis para troca" description="Escolha uma atividade sua, pendente e dentro do prazo. Tarefas com pedido em andamento não podem participar de outra troca." /><button className="btn secondary" onClick={closeModal}>Entendi</button></div>;
-  return <DialogForm submitLabel="Enviar pedido" disabled={!options.length} onSubmit={async data => {
-    await mutate('swap', { taskA, taskB: data.taskB });
-    closeModal(); notify('Pedido enviado. Aguarde o aceite do outro morador.');
+  return <DialogForm submitLabel="Enviar pedido" disabled={!options.some(task => task.id === taskB)} onSubmit={async () => {
+    if (!options.some(task => task.id === taskB)) throw new Error('Selecione uma atividade disponível do outro morador.');
+    const recipient = userFor(state, options.find(task => task.id === taskB).assignee_id);
+    await mutate('swap', { taskA, taskB });
+    navigate('swaps'); notify('Pedido enviado para ' + recipient.name + '. Aguarde o aceite na tela Trocas.');
   }}>
-    <Select label="Minha atividade" name="taskA" value={taskA} onChange={event => setTaskA(event.target.value)}>{own.map(task => <option key={task.id} value={task.id}>{task.title} · {formatDate(task.due_date, { day: '2-digit', month: '2-digit' })}</option>)}</Select>
+    <Select label="Minha atividade" name="taskA" value={taskA} onChange={event => { setTaskA(event.target.value); setTaskB(''); }}>{own.map(task => <option key={task.id} value={task.id}>{task.title} · {formatDate(task.due_date, { day: '2-digit', month: '2-digit' })}</option>)}</Select>
     <div className="swap-direction"><Icon name="swap" size={25} /></div>
-    <Select key={taskA} label="Quero trocar por" name="taskB" required defaultValue=""><option value="" disabled>{options.length ? 'Selecione uma atividade' : 'Nenhuma atividade disponível neste mês'}</option>{options.map(task => <option key={task.id} value={task.id}>{task.title} · {formatDate(task.due_date, { day: '2-digit', month: '2-digit' })} · {userFor(state, task.assignee_id).name}</option>)}</Select>
+    <Select label="Quero trocar por" name="taskB" required value={options.some(task => task.id === taskB) ? taskB : ''} onChange={event => setTaskB(event.target.value)}><option value="" disabled>{options.length ? 'Selecione uma atividade' : 'Nenhuma atividade disponível neste mês'}</option>{options.map(task => <option key={task.id} value={task.id}>{userFor(state, task.assignee_id).name} · {task.title} · {formatDate(task.due_date, { day: '2-digit', month: '2-digit' })}</option>)}</Select>
+    {!options.length && <p className="form-error" role="status">Nenhum outro morador tem uma atividade disponível neste mês. Escolha outra atividade sua ou peça à administração para revisar a agenda.</p>}
     <p className="hint">A troca precisa do aceite do outro morador. Apenas atividades do mesmo mês, dentro do prazo e sem pedido pendente aparecem aqui.</p>
   </DialogForm>;
 }
@@ -163,9 +169,10 @@ function ProfileDialog() {
 }
 
 function NotificationsDialog() {
-  const { state, now, busy, act } = useHouse();
+  const { state, now, busy, act, navigate } = useHouse();
+  const incoming = state.swaps.filter(swap => swap.status === 'pending' && swap.recipient_id === state.user.id);
   const tasks = state.tasks.filter(task => task.assignee_id === state.user.id && task.status === 'pending' && task.due_date <= now.date).sort((a, b) => a.due_date.localeCompare(b.due_date) || a.deadline.localeCompare(b.deadline));
-  return <div className="stack"><div>{tasks.map(task => <div className="notification-item" key={task.id}><Icon name="bell" size={18} /><div><strong>{task.title}</strong><small>{formatDate(task.due_date)} · até {task.deadline} · {isDue(task, now) ? 'em atraso' : 'pendente'}</small></div><button type="button" className="btn secondary compact" disabled={busy} onClick={() => act('complete', { id: task.id }, 'Atividade concluída. Obrigado por cuidar da casa!')}><Icon name="check" size={14} />Concluir</button></div>)}{!tasks.length && <Empty title="Você fez sua parte" description="Nenhuma atividade pendente até hoje. A casa agradece!" />}</div>
+  return <div className="stack">{incoming.length > 0 && <section className="stack"><h3>Pedidos de troca recebidos</h3>{incoming.map(swap => <div className="notification-item" key={swap.id}><Icon name="swap" size={18} /><div><strong>{userFor(state, swap.requester_id).name} pediu uma troca</strong><small>{state.tasks.find(task => task.id === swap.task_a)?.title} por {state.tasks.find(task => task.id === swap.task_b)?.title}</small></div><button type="button" className="btn secondary compact" disabled={busy} onClick={() => navigate('swaps')}>Ver pedido</button></div>)}</section>}<div>{tasks.map(task => <div className="notification-item" key={task.id}><Icon name="bell" size={18} /><div><strong>{task.title}</strong><small>{formatDate(task.due_date)} · até {task.deadline} · {isDue(task, now) ? 'em atraso' : 'pendente'}</small></div><button type="button" className="btn secondary compact" disabled={busy} onClick={() => act('complete', { id: task.id }, 'Atividade concluída. Obrigado por cuidar da casa!')}><Icon name="check" size={14} />Concluir</button></div>)}{!tasks.length && !incoming.length && <Empty title="Você fez sua parte" description="Nenhuma atividade pendente até hoje. A casa agradece!" />}</div>
     <NotificationSettings />
   </div>;
 }
@@ -178,7 +185,7 @@ const definitions = {
   invite: ['Convite pronto para compartilhar', 'Um acesso pessoal para a rotina da casa.', InviteDialog],
   swap: ['Vamos ajustar os planos?', 'Proponha uma troca de atividades entre moradores.', SwapDialog],
   profile: ['Meu perfil', 'Seus dados e seu acesso à casa.', ProfileDialog],
-  notifications: ['Um lembrete de cuidado', 'Suas atividades que ainda precisam de atenção.', NotificationsDialog],
+  notifications: ['Um lembrete de cuidado', 'Suas atividades e os pedidos de troca que precisam de atenção.', NotificationsDialog],
 };
 
 export default function Dialogs({ modal }) {

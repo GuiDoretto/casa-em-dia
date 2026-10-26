@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { compareManifests } from '../cloudflare/data-transfer.mjs';
+import { TABLES, compareManifests } from '../cloudflare/data-transfer.mjs';
 import { localNow } from '../rules.mjs';
 
 // Real workerd + DO SQLite, exclusively disposable state and fake local tokens.
@@ -136,7 +136,38 @@ try {
   assert.equal(drawing.data.created.length, 4);
   assert.equal(ok(await call(base, 'draw', { date: future }, cookie), 'repeat draw').data.created.length, 0);
   ok(await call(base, 'profile-photo', { photo: 'data:image/png;base64,' + image }, memberCookie), 'photo');
+  const financialMonth = day.slice(0, 7);
+  ok(await call(base, 'room-save', { name: 'Suíte Worker', rent: '800.00', features: 'Banheiro próprio', resident_id: adminId }, cookie), 'admin room');
+  ok(await call(base, 'room-save', { name: 'Quarto Worker', rent: '500.00', features: 'Janela para o jardim', resident_id: memberId }, cookie), 'member room');
+  ok(await call(base, 'room-save', { name: 'Quarto disponível', rent: '600.00', features: 'Armário e varanda', resident_id: '' }, cookie), 'vacant room');
+  const expense = ok(await call(base, 'expense-save', { month: financialMonth, description: 'Energia Worker', amount: '100.01' }, cookie), 'monthly expense').data.expenses[0];
+  const generated = ok(await call(base, 'bills-generate', { month: financialMonth }, cookie), 'generate bills').data;
+  assert.equal(generated.rooms.length, 3);
+  assert.equal(generated.rooms.filter(room => !room.resident_id).length, 1);
+  assert.equal(generated.bills.length, 2);
+  assert.deepEqual(generated.bills.map(bill => bill.shared_cents).sort((a, b) => a - b), [5000, 5001]);
+  assert.equal(generated.bills.reduce((sum, bill) => sum + bill.shared_cents, 0), 10001);
+  assert.equal(generated.bills.reduce((sum, bill) => sum + bill.total_cents, 0), 140001);
+  assert.equal(generated.bills.find(bill => bill.user_id === adminId).rent_cents, 80000);
+  assert.equal(generated.bills.find(bill => bill.user_id === memberId).rent_cents, 50000);
+  assert.ok(generated.bills.every(bill => bill.room_name !== 'Quarto disponível'));
+  const memberFinancialState = ok(await call(base, 'state', undefined, memberCookie), 'private member bills').data;
+  assert.equal(memberFinancialState.bills.length, 1);
+  assert.equal(memberFinancialState.bills[0].user_id, memberId);
+  assert.equal(memberFinancialState.bills[0].expenses[0].amount_cents, 10001);
+  assert.deepEqual(memberFinancialState.expenses, []);
+  assert.equal(memberFinancialState.users.find(user => user.id === adminId).email, undefined);
+  for (const [path, data] of [
+    ['room-save', { name: 'Quarto indevido', rent: '1', features: '' }],
+    ['room-delete', { id: generated.rooms.find(room => !room.resident_id).id }],
+    ['expense-save', { month: financialMonth, description: 'Despesa indevida', amount: '1' }],
+    ['expense-delete', { id: expense.id }],
+    ['bills-generate', { month: financialMonth }],
+  ]) assert.equal((await call(base, path, data, memberCookie)).status, 403, 'Member cannot ' + path);
   const before = ok(await call(base, 'state', undefined, cookie), 'state').data;
+  assert.deepEqual(before.rooms, generated.rooms);
+  assert.deepEqual(before.expenses, generated.expenses);
+  assert.deepEqual(before.bills, generated.bills);
   const photoUrl = before.users.find(user => user.id === memberId).photo_url;
   assert.equal((await fetch(base + photoUrl)).status, 401);
   assert.deepEqual(Buffer.from(await (await fetch(base + photoUrl, { headers: { Cookie: cookie } })).arrayBuffer()), Buffer.from(image, 'base64'));
@@ -162,11 +193,12 @@ try {
   }
 
   console.log('OK workerd: assets, login, convites, permissões, transações concorrentes, sorteios e fotos.');
+  console.log('OK workerd: quartos ocupados/vazio, aluguéis diferentes, rateio de R$ 100,01, privacidade e permissões financeiras.');
   base = await start('source', true);
   assert.equal((await admin(base, 'export', undefined, false)).status, 401);
   assert.equal((await call(base, 'login', { email: setup.email, password: setup.password })).status, 503);
   const snapshot = ok(await admin(base, 'export'), 'full export').data;
-  assert.equal(snapshot.tables.length, 13);
+  assert.equal(snapshot.tables.length, TABLES.length);
   const userTable = snapshot.tables.find(table => table.name === 'users');
   const savedAdmin = userTable.rows.find(row => row[userTable.columns.indexOf('id')] === adminId);
   assert.equal(savedAdmin[userTable.columns.indexOf('password_hash')], scryptSync(setup.password, savedAdmin[userTable.columns.indexOf('password_salt')], 64).toString('hex'));
@@ -181,14 +213,25 @@ try {
   const importedState = ok(await call(base, 'state', undefined, cookie), 'imported session').data;
   assert.equal(importedState.notifications.push.publicKey, before.notifications.push.publicKey);
   assert.deepEqual(importedState.tasks, before.tasks);
+  assert.deepEqual(importedState.rooms, before.rooms);
+  assert.deepEqual(importedState.expenses, before.expenses);
+  assert.deepEqual(importedState.bills, before.bills);
+  const importedMember = ok(await call(base, 'state', undefined, memberCookie), 'imported private bills').data;
+  assert.deepEqual(importedMember.bills, memberFinancialState.bills);
+  assert.deepEqual(importedMember.expenses, []);
   assert.deepEqual(Buffer.from(await (await fetch(base + photoUrl, { headers: { Cookie: cookie } })).arrayBuffer()), Buffer.from(image, 'base64'));
   base = await start('target', false);
   assert.equal((await admin(base, 'manifest')).status, 404);
   const login = ok(await call(base, 'login', { email: setup.email, password: setup.password }), 'existing password');
   assert.deepEqual(login.data.tasks, before.tasks);
-  ok(await call(base, 'login', { email: 'bruno@worker.test', password: 'Senha Bruno 2026!' }), 'member password');
+  assert.deepEqual(login.data.rooms, before.rooms);
+  assert.deepEqual(login.data.expenses, before.expenses);
+  assert.deepEqual(login.data.bills, before.bills);
+  const memberLogin = ok(await call(base, 'login', { email: 'bruno@worker.test', password: 'Senha Bruno 2026!' }), 'member password');
+  assert.deepEqual(memberLogin.data.bills, memberFinancialState.bills);
+  assert.deepEqual(memberLogin.data.expenses, []);
   assert.equal(ok(await call(base, 'state', undefined, cookie), 'persisted state').data.user.id, adminId);
-  console.log('OK workerd: backup integral, hashes das 13 tabelas, importação atômica, VAPID original, fotos e senhas após reinício.');
+  console.log(`OK workerd: backup integral, hashes das ${TABLES.length} tabelas, importação atômica, VAPID original, fotos, quartos, despesas e cobranças privadas após reinício.`);
 
   // Provision only the new account in the imported disposable household.
   // The password is generated for this test and never comes from the workspace.

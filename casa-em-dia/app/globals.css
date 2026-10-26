@@ -123,3 +123,6 @@
   .calendar-side .done-label{font-size:12px;margin-right:auto}
   .calendar-side .done-label small{font-size:10px}
 }
+.sidebar nav{min-height:0;overflow-y:auto}
+.mobile-extra-menu{display:grid;gap:10px}.mobile-extra-menu .btn{justify-content:flex-start;min-height:48px}
+@media(max-width:760px){.mobile-nav button{min-height:44px;font-size:10px}.mobile-nav svg{width:21px}}

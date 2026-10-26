@@ -1,0 +1,14 @@
+.install-prompt{display:flex;align-items:flex-start;gap:13px;padding:19px;margin-bottom:23px;background:#eef4e7;border:1px solid #d7e3c8;border-radius:12px;color:#405d35}
+.install-prompt-icon{display:grid;place-items:center;flex-shrink:0;width:39px;height:42px;border-radius:10px;background:#e0ebd3;color:#64834e}
+.install-prompt-content{flex:1;min-width:0}
+.install-prompt-content h2{font-size:15px;line-height:1.5;letter-spacing:-.2px}
+.install-prompt-content>p{font-size:11px;line-height:1.8;color:#738465;margin-top:3px}
+.install-prompt-actions{display:flex;align-items:center;flex-wrap:wrap;gap:17px;margin-top:13px}
+.install-prompt-actions .text-btn{font-size:11px}
+.install-prompt-close{width:28px;height:28px;margin:-5px -7px 0 0}
+.install-prompt-instructions{padding-top:13px;font-size:11px;line-height:1.9;color:#526c43}
+.install-prompt-instructions ol{padding-left:19px;margin:0}
+.install-prompt-instructions li+li{margin-top:5px}
+.install-prompt-instructions p{font-size:10px;line-height:1.8;margin-top:9px;color:#738465}
+.install-prompt-content>.install-prompt-error{color:#9c5740;margin-top:12px}
+@media(max-width:420px){.install-prompt{gap:10px;padding:15px;margin-bottom:19px}.install-prompt-icon{width:31px;height:35px}.install-prompt-icon svg{width:20px}.install-prompt-content h2{font-size:13px}.install-prompt-content>p{font-size:10px}.install-prompt-actions{gap:12px}.install-prompt-actions .btn{font-size:10px;padding:9px 11px}.install-prompt-close{width:23px;height:26px}.install-prompt-instructions{font-size:10px}}

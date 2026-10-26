@@ -78,7 +78,7 @@ export class CasaDatabase extends DurableObject {
       // Publish the imported VAPID and services only after the complete SQL
       // transaction, including initialization checks, has committed successfully.
       this.application = replacement;
-      console.log(JSON.stringify({ event: 'import_verified', tables: 13 }));
+      console.log(JSON.stringify({ event: 'import_verified', tables: manifest.tables.length }));
       return Response.json(manifest);
     }
     throw Object.assign(new Error('Rota não encontrada.'), { status: 404 });

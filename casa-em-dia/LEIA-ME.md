@@ -105,7 +105,7 @@ O banco do seu computador e o banco da hospedagem são **independentes**. Não h
 
 Para um backup local completo, pare com **Ctrl+C** e copie a pasta `.data` inteira para um lugar privado. Para restaurar, pare o servidor, guarde uma cópia do banco atual e substitua a pasta `.data` pela cópia desejada. Não copie somente o `casa.sqlite` enquanto o app estiver ligado: o SQLite também pode usar arquivos auxiliares de transações.
 
-As cópias contêm contatos, senhas derivadas e sessões. Mantenha `.data`, backups e convites fora do Git. A exportação JSON disponível na interface do admin inclui os calendários arquivados, com suas atividades, pontos e trocas. Serve para consulta e portabilidade; não contém senhas nem convites e não tem importador na interface. Para o backup completo da Cloudflare, use o snapshot operacional das 13 tabelas descrito no **[guia Cloudflare](docs/CLOUDFLARE.md)**; ele inclui também autenticação, configurações e fotos.
+As cópias contêm contatos, senhas derivadas e sessões. Mantenha `.data`, backups e convites fora do Git. A exportação JSON disponível na interface do admin inclui os calendários arquivados, com suas atividades, pontos e trocas. Serve para consulta e portabilidade; não contém senhas nem convites e não tem importador na interface. Para o backup completo da Cloudflare, use o snapshot operacional das 16 tabelas descrito no **[guia Cloudflare](docs/CLOUDFLARE.md)**; ele inclui também autenticação, configurações, fotos, quartos, despesas e cobranças. Snapshots antigos em formato v1 continuam aceitos.
 
 ### Fotos dos moradores
 
@@ -182,3 +182,17 @@ A interface original foi guardada em `legacy/public/` como referência. O arquiv
 ### Escolher os ícones das atividades
 
 Na Administração, clique no lápis de uma atividade recorrente (ou no botão de adicionar) e escolha um dos 12 ícones de casa, cozinha, limpeza e outros cuidados. Salve a atividade. O ícone aparece na lista e é copiado para as tarefas dos próximos sorteios. Para mudar o ícone de uma tarefa já agendada, edite essa tarefa na agenda; a mudança é individual. Atividades antigas recebem um ícone sugerido pelo ambiente e pelo nome até você escolher outro.
+
+## Quartos, despesas e acesso administrativo
+
+Na tela **Quartos**, a administração cadastra os quartos com nome, aluguel mensal, diferenciais e um morador ativo. Deixe o morador em branco para indicar uma vaga. Cada morador ocupa um quarto; para transferi-lo, libere primeiro o anterior. Desativar o morador libera seu quarto. Excluir um quarto vazio preserva os demonstrativos já gerados.
+
+Em **Despesas**, escolha o mês e adicione os valores totais de água, energia, internet e outras contas comuns. A prévia soma o aluguel individual de cada quarto à divisão igual das despesas entre seus ocupantes. Quartos vazios e moradores sem quarto não participam. Centavos restantes são distribuídos de forma estável para fechar exatamente o valor das contas.
+
+Clique em **Gerar demonstrativos** para salvar o fechamento. O morador acessa somente as próprias cobranças. Alterações em quartos ou despesas não mudam os demonstrativos salvos: **Atualizar demonstrativos** substitui o fechamento daquele mês com os valores e a ocupação atuais. Outros meses são preservados. Cobranças anteriores a uma mudança de quarto devem ser conferidas antes de atualizar.
+
+Cada demonstrativo oferece **Copiar cobrança**, **WhatsApp** e **Compartilhar**. O WhatsApp prepara a mensagem para o telefone cadastrado; o envio é concluído pelo usuário. Não há disparo automático. A mensagem contém apenas o demonstrativo do respectivo morador.
+
+O cadastro e a edição de moradores têm a opção **Administrador da casa**. Novos moradores vêm com essa opção desmarcada. Somente um administrador pode alterar os acessos, e a última conta administrativa ativa com senha não pode perder o papel.
+
+No celular, **Mais** abre Quartos, Moradores, Ranking e as opções administrativas disponíveis. O aviso de instalação respeita a escolha **Agora não** e não aparece quando o site já está aberto como aplicativo instalado. No iPhone/iPad, o aviso ensina a adicionar pelo Safari; no Android, usa o pedido nativo quando o navegador o disponibiliza.
