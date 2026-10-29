@@ -241,6 +241,110 @@ try {
   state = await (await admin.request.get('/api/state')).json();
   assert.equal(state.tasks.filter(t => t.status === 'done').length, 1);
 
+  // Calendar opens at today, keeps history reachable, and remembers each resident's view.
+  await nav('Agenda');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.waitForFunction(() => document.querySelector('.agenda')?.dataset.ready === 'true');
+  const calendarToday = localNow().date;
+  const preferenceKey = 'casa-calendar-view:' + state.user.id;
+  await page.waitForFunction(day => {
+    const viewport = document.querySelector('.agenda-stream');
+    return viewport && Math.abs(viewport.querySelector('[data-date="' + day + '"]').getBoundingClientRect().top - viewport.getBoundingClientRect().top) < 2;
+  }, calendarToday);
+  const todayPosition = await page.locator('.agenda-stream').evaluate((viewport, day) => {
+    const item = viewport.querySelector('[data-date="' + day + '"]');
+    return { offset: item.getBoundingClientRect().top - viewport.getBoundingClientRect().top, scroll: viewport.scrollTop };
+  }, calendarToday);
+  assert.ok(Math.abs(todayPosition.offset) < 2, 'A linha do tempo deve abrir com hoje no topo');
+  if (Number(calendarToday.slice(8)) > 1) assert.ok(todayPosition.scroll > 0, 'Os dias anteriores ficam fora da área inicial');
+  await page.locator('.agenda-stream').evaluate(viewport => { viewport.scrollTop = 0; });
+  assert.ok(await page.locator('.agenda-stream .agenda-stream-day').first().isVisible(), 'O histórico continua acessível ao voltar a rolagem');
+  await page.locator('.agenda-controls').getByRole('button', { name: 'Hoje', exact: true }).click();
+  await page.waitForFunction(day => {
+    const viewport = document.querySelector('.agenda-stream');
+    return Math.abs(viewport.querySelector('[data-date="' + day + '"]').getBoundingClientRect().top - viewport.getBoundingClientRect().top) < 2;
+  }, calendarToday);
+  await page.locator('#agenda-person').selectOption(state.user.id);
+  const monthTasks = state.tasks.filter(task => task.due_date.startsWith(calendarToday.slice(0, 7)) && task.assignee_id === state.user.id);
+  assert.equal(await page.locator('.agenda-stream .task-card').count(), monthTasks.length, 'O filtro vale para toda a linha do tempo');
+  await page.locator('#agenda-person').selectOption('');
+  await page.getByRole('button', { name: /^Foco/ }).click();
+  await page.waitForFunction(day => document.querySelector('.agenda-focus-day:not([inert])')?.dataset.date === day, calendarToday);
+  await page.getByRole('button', { name: 'Próximo dia', exact: true }).click();
+  const nextCalendarDay = addDay(calendarToday, 1);
+  await page.waitForFunction(day => document.querySelector('.agenda-focus-day:not([inert])')?.dataset.date === day, nextCalendarDay);
+  await page.getByRole('button', { name: 'Dia anterior', exact: true }).click();
+  await page.waitForFunction(day => document.querySelector('.agenda-focus-day:not([inert])')?.dataset.date === day, calendarToday);
+  await page.locator('.agenda-focus-deck').focus();
+  await page.locator('.agenda-focus-deck').press('ArrowRight');
+  await page.waitForFunction(day => document.querySelector('.agenda-focus-day:not([inert])')?.dataset.date === day, nextCalendarDay);
+  await page.locator('.agenda-controls').getByRole('button', { name: 'Hoje', exact: true }).click();
+  await page.waitForFunction(day => document.querySelector('.agenda-focus-day:not([inert])')?.dataset.date === day, calendarToday);
+  // Exercise an actual touch swipe through the day cards.
+  const touch = await admin.newCDPSession(page);
+  await touch.send('Emulation.setTouchEmulationEnabled', { enabled: true });
+  async function swipeCalendar(left) {
+    await page.locator('.agenda-focus-deck').scrollIntoViewIfNeeded();
+    const box = await page.locator('.agenda-focus-deck').boundingBox();
+    const y = Math.max(60, Math.min(650, box.y + box.height / 2));
+    const x1 = box.x + box.width * (left ? .8 : .2), x2 = box.x + box.width * (left ? .2 : .8);
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x1, y }] });
+    for (let step = 1; step <= 5; step++) await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x1 + (x2 - x1) * step / 5, y }] });
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  }
+  await swipeCalendar(true);
+  await page.waitForFunction(day => document.querySelector('.agenda-focus-day')?.dataset.date === day, nextCalendarDay);
+  await swipeCalendar(false);
+  await page.waitForFunction(day => document.querySelector('.agenda-focus-day')?.dataset.date === day, calendarToday);
+  const firstCalendarDay = calendarToday.slice(0, 7) + '-01';
+  await page.locator('.agenda-date-rail button').first().click();
+  await swipeCalendar(false);
+  await page.waitForFunction(day => document.querySelector('.agenda-focus-day')?.dataset.date === day, addDay(firstCalendarDay, -1));
+  await swipeCalendar(true);
+  await page.waitForFunction(day => document.querySelector('.agenda-focus-day')?.dataset.date === day, firstCalendarDay);
+  await page.locator('.agenda-controls').getByRole('button', { name: 'Hoje', exact: true }).click();
+  await touch.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+  await touch.detach();
+  await page.getByRole('button', { name: 'Mês', exact: true }).click();
+  await page.locator('.agenda-controls').getByRole('button', { name: 'Hoje', exact: true }).click();
+  assert.equal(await page.locator('.agenda-month-day.today').getAttribute('aria-pressed'), 'true');
+  const todayCell = page.locator('.agenda-month-day.today');
+  const todayIndex = await todayCell.evaluate(element => Array.from(element.parentElement.querySelectorAll('button')).indexOf(element));
+  if (await page.locator('.agenda-month-day').count() > todayIndex + 1) {
+    await page.locator('.agenda-month-day').nth(todayIndex + 1).click();
+    assert.equal(await page.locator('.agenda-month-day[aria-pressed=true]').count(), 1);
+    assert.equal(await page.locator('.agenda-month-day.today').getAttribute('aria-pressed'), 'false');
+  }
+  for (const mode of ['Fluxo', 'Foco', 'Mês']) {
+    await page.getByRole('button', { name: mode, exact: true }).click();
+    await page.locator('.agenda-controls').getByRole('button', { name: 'Hoje', exact: true }).click();
+    for (const width of [320, 390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, mode + ' não deve ter rolagem horizontal em ' + width);
+      if (width === 390) await page.screenshot({ path: join(artifacts, 'agenda-' + mode.toLowerCase() + '-390.png'), fullPage: true });
+    }
+  }
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), preferenceKey), 'month');
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('.agenda-mode-month[data-ready=true]'));
+  assert.equal(await page.locator('.agenda-month-day.today').getAttribute('aria-pressed'), 'true', 'Reabrir a agenda retorna a hoje e preserva o estilo');
+  await page.getByRole('button', { name: 'Mês anterior', exact: true }).click();
+  assert.equal(await page.locator('.agenda-month-day[aria-pressed=true]').count(), 1);
+  await page.locator('.agenda-controls').getByRole('button', { name: 'Hoje', exact: true }).click();
+  assert.equal(await page.locator('.agenda-month-day.today').getAttribute('aria-pressed'), 'true');
+  const blockedStorage = await browser.newContext({ baseURL: base, storageState: await admin.storageState(), viewport: { width: 390, height: 844 } });
+  await blockedStorage.addInitScript(() => { Storage.prototype.getItem = function() { throw new Error('Storage bloqueado'); }; Storage.prototype.setItem = function() { throw new Error('Storage bloqueado'); }; });
+  const blockedPage = await blockedStorage.newPage();
+  blockedPage.on('pageerror', error => errors.push(error.message));
+  await blockedPage.goto('/');
+  await blockedPage.getByRole('navigation', { name: 'Menu para celular' }).getByRole('button', { name: 'Agenda', exact: true }).click();
+  await blockedPage.locator('.agenda-mode-flow[data-ready=true]').waitFor();
+  await blockedPage.getByRole('button', { name: /^Foco/ }).click();
+  await blockedPage.locator('.agenda-mode-focus').waitFor();
+  await blockedStorage.close();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+
   for (const screen of ['Hoje', 'Agenda', 'Sorteador', 'Trocas', 'Moradores', 'Ranking', 'Administração']) {
     await page.setViewportSize({ width: 1440, height: 1000 }); await nav(screen);
     for (const width of [320, 390, 768, 1440]) {

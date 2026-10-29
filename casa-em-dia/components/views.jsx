@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { CalendarView } from './calendar-view';
 import { resolveActivityIcon } from '../activity-icons.mjs';
 import { Avatar, Empty, Icon } from './ui';
 import { useHouse } from '../lib/house-context';
@@ -9,12 +10,12 @@ export { Draw, Residents, Ranking, Swaps } from './secondary-views';
 export function HouseArt() {
   return <svg className="house-art" viewBox="0 0 300 220" fill="none" aria-hidden="true"><ellipse cx="156" cy="205" rx="120" ry="9" fill="#cdddbb" /><path d="m75 102 79-66 80 66v100H75Z" fill="#fcfdf7" stroke="#bccdad" strokeWidth="1.5" /><path d="m60 105 94-79 95 79" stroke="#6d8a58" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" /><path d="M97 77V40h18v22" fill="#9eb783" /><rect x="139" y="142" width="34" height="61" rx="4" fill="#9bb381" /><circle cx="165" cy="174" r="2" fill="#eff4e5" /><g fill="#e1ebd4" stroke="#a5ba90"><rect x="94" y="115" width="27" height="31" rx="3" /><rect x="189" y="115" width="27" height="31" rx="3" /><path d="M107 115v31m-13-16h27m81-15v31m-13-16h27" /></g><path d="M250 202v-54m0 30c-23-1-26-18-22-25 18 0 23 17 22 25Zm0-17c20-3 25-20 20-27-16 2-21 18-20 27Z" stroke="#78965e" strokeWidth="2" fill="#b0c98e" /><path d="m235 187 4 19h24l4-19Z" fill="#bfa680" /><path d="M47 201v-35m0 18c-17-3-21-17-16-22 13 1 17 12 16 22Zm0-12c13-3 20-16 15-22-12 1-16 14-15 22Z" fill="#bad29c" stroke="#90aa70" strokeWidth="1.7" /><path d="m35 190 3 16h21l3-16Z" fill="#d4c5a7" /><path d="m255 60 3 9 9 3-9 3-3 9-3-9-9-3 9-3Z" fill="#97b575" /><path d="m51 80 2 6 6 2-6 2-2 6-2-6-6-2 6-2Z" fill="#adc58c" /><circle cx="221" cy="31" r="5" fill="#bfd3a6" /><path d="M141 203h30l16 10h-62Z" fill="#bbcfa5" /></svg>;
 }
-export function TaskCard({ task, showDate = false }) {
+export function TaskCard({ task, showDate = false, ownerPhoto = false }) {
   const { state, now, isAdmin, busy, act, openModal } = useHouse();
   const owner = userFor(state, task.assignee_id), mine = owner.id === state.user.id;
   const done = task.status === 'done', paused = task.status === 'paused';
   const areaIcon = resolveActivityIcon(task);
-  return <article className={'task-card ' + (done ? 'is-done' : '')}><div className={'task-icon ' + areaIcon}><Icon name={areaIcon} size={23} /></div><div className="task-info"><h3>{task.title}</h3><div className="task-meta"><span>{showDate ? formatDate(task.due_date, { day: '2-digit', month: '2-digit' }) : task.area}</span><span><Icon name="clock" size={12} />{task.duration} min</span><span className="task-owner"><Avatar user={owner} index={state.users.findIndex(u => u.id === owner.id)} />{mine ? 'Você' : owner.name.split(' ')[0]}</span></div></div><div className="task-tail">{done ? <span className="done-label"><Icon name="check" size={15} />Concluída {task.points > 0 && <small>+{task.points}</small>}</span> : <span className={'pill ' + (paused ? '' : isDue(task, now) ? 'red' : 'amber')}>{paused ? 'Pausada' : isDue(task, now) ? 'Em atraso' : 'Até ' + task.deadline}</span>}{!done && !paused && mine && task.due_date <= now.date && <button disabled={busy} className="btn complete-btn" onClick={() => act('complete', { id: task.id }, 'Atividade concluída. Obrigado por cuidar da casa!')}><Icon name="check" size={15} />Concluir</button>}{!done && !paused && mine && swappable(task, now) && <button className="icon-btn" aria-label={'Pedir troca de ' + task.title} title="Pedir troca" onClick={() => openModal({ type: 'swap', task })}><Icon name="swap" size={17} /></button>}{!done && isAdmin && <button className="icon-btn" aria-label={'Editar ' + task.title} onClick={() => openModal({ type: 'task', task })}><Icon name="edit" size={16} /></button>}</div></article>;
+  return <article className={'task-card ' + (done ? 'is-done' : '')}><div className={'task-icon ' + areaIcon + (ownerPhoto ? ' task-owner-photo' : '')}>{ownerPhoto ? <Avatar user={owner} index={state.users.findIndex(u => u.id === owner.id)} /> : <Icon name={areaIcon} size={23} />}</div><div className="task-info"><h3>{task.title}</h3><div className="task-meta"><span>{showDate ? formatDate(task.due_date, { day: '2-digit', month: '2-digit' }) : task.area}</span><span><Icon name="clock" size={12} />{task.duration} min</span><span className="task-owner"><Avatar user={owner} index={state.users.findIndex(u => u.id === owner.id)} />{mine ? 'Você' : ownerPhoto ? owner.name : owner.name.split(' ')[0]}</span></div></div><div className="task-tail">{done ? <span className="done-label"><Icon name="check" size={15} />Concluída {task.points > 0 && <small>+{task.points}</small>}</span> : <span className={'pill ' + (paused ? '' : isDue(task, now) ? 'red' : 'amber')}>{paused ? 'Pausada' : isDue(task, now) ? 'Em atraso' : 'Até ' + task.deadline}</span>}{!done && !paused && mine && task.due_date <= now.date && <button disabled={busy} className="btn complete-btn" onClick={() => act('complete', { id: task.id }, 'Atividade concluída. Obrigado por cuidar da casa!')}><Icon name="check" size={15} />Concluir</button>}{!done && !paused && mine && swappable(task, now) && <button className="icon-btn" aria-label={'Pedir troca de ' + task.title} title="Pedir troca" onClick={() => openModal({ type: 'swap', task })}><Icon name="swap" size={17} /></button>}{!done && isAdmin && <button className="icon-btn" aria-label={'Editar ' + task.title} onClick={() => openModal({ type: 'task', task })}><Icon name="edit" size={16} /></button>}</div></article>;
 }
 export function Dashboard() {
   const { state, now, selected, setSelected, navigate } = useHouse();
@@ -45,67 +46,4 @@ export function MonthSwitcher() {
   const move = delta => { const next = changeMonth(month, delta); setMonth(next); setSelected(next === now.date.slice(0, 7) ? now.date : next + '-01'); };
   return <div className="month-switcher"><button className="icon-btn" aria-label="Mês anterior" onClick={() => move(-1)}><Icon name="left" size={19} /></button><h2>{monthLabel(month)}</h2><button className="icon-btn" aria-label="Próximo mês" onClick={() => move(1)}><Icon name="right" size={19} /></button></div>;
 }
-export function Calendar() {
-  const { state, now, month, setMonth, selected, setSelected } = useHouse();
-  const [person, setPerson] = useState('');
-  const start = monday(month + '-01'), last = addDay(changeMonth(month, 1) + '-01', -1);
-  const rows = Math.ceil(((new Date(month + '-01T12:00:00Z').getUTCDay() + 6) % 7 + Number(last.slice(8))) / 7);
-  const tasks = state.tasks.filter(t => !person || t.assignee_id === person);
-  const selectedTasks = tasks.filter(t => t.due_date === selected);
-  return <div className="calendar-layout">
-    <section className="panel calendar-panel">
-      <div className="calendar-toolbar">
-        <MonthSwitcher />
-        <div className="row">
-          <button className="btn secondary small-btn" onClick={() => { setMonth(now.date.slice(0, 7)); setSelected(now.date); }}>Hoje</button>
-          <label className="sr-only" htmlFor="calendar-person">Filtrar morador</label>
-          <select id="calendar-person" value={person} onChange={e => setPerson(e.target.value)}>
-            <option value="">Todos os moradores</option>
-            {state.users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-        </div>
-      </div>
-      <p className="calendar-mobile-hint"><Icon name="calendar" size={14} />Atividades e responsáveis · toque no dia para ver detalhes</p>
-      <div className="calendar-grid" role="group" aria-label={'Calendário de ' + monthLabel(month)}>
-        {['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'].map(d => <div className="calendar-weekday" key={d}>{d}</div>)}
-        {Array.from({ length: rows * 7 }, (_, i) => addDay(start, i)).map(day => {
-          const dayTasks = tasks.filter(t => t.due_date === day), reason = offReason(day, state.settings);
-          return <button key={day} onClick={() => setSelected(day)}
-            className={'calendar-day ' + (day.slice(0, 7) !== month ? 'outside ' : '') + (selected === day ? 'selected ' : '') + (day === now.date ? 'today ' : '')}
-            aria-pressed={day === selected} aria-current={day === now.date ? 'date' : undefined}
-            aria-controls="calendar-selected-tasks"
-            aria-label={formatDate(day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + dayTasks.length + (dayTasks.length === 1 ? ' atividade' : ' atividades') + (reason ? ', ' + reason : '')}>
-            <span className="calendar-mobile-date" aria-hidden="true"><strong>{Number(day.slice(8))}</strong><small>{formatDate(day, { weekday: 'short' })}</small>{day === now.date && <small>Hoje</small>}</span>
-            <span className="calendar-mobile-tasks">
-              {dayTasks.length ? dayTasks.map(task => {
-                const ownerIndex = state.users.findIndex(user => user.id === task.assignee_id);
-                const owner = state.users[ownerIndex];
-                return <span key={task.id} className={'calendar-mobile-task ' + task.status}>
-                  <Avatar user={owner || { name: 'Sem responsável' }} index={ownerIndex} />
-                  <span className="calendar-mobile-task-copy"><strong>{task.title}</strong><span>{owner?.name || 'Sem responsável'}</span><small>{task.status === 'done' ? 'Concluída' : task.status === 'paused' ? 'Pausada' : 'Pendente'}</small></span>
-                </span>;
-              }) : <span className="calendar-mobile-empty">{reason || 'Dia livre'}</span>}
-            </span>
-            <span className="calendar-number">{Number(day.slice(8))}</span>
-            <span className="calendar-day-summary" aria-hidden="true">
-              {dayTasks.length > 0 ? <><span className="calendar-task-count">{dayTasks.length}</span><span className="calendar-status-dots">{['pending', 'done', 'paused'].filter(status => dayTasks.some(task => task.status === status)).map(status => <i key={status} className={status} />)}</span></> : reason ? <Icon name="leaf" size={12} /> : null}
-            </span>
-            <span className="calendar-day-details">
-              {reason && !dayTasks.length && <small className="calendar-off">{reason}</small>}
-              {dayTasks.slice(0, 2).map(t => <span key={t.id} className={'calendar-task ' + t.status}>{t.title}</span>)}
-              {dayTasks.length > 2 && <small className="calendar-more">+{dayTasks.length - 2} atividade(s)</small>}
-            </span>
-          </button>;
-        })}
-      </div>
-      <div className="calendar-legend"><span><i />Pendente</span><span><i className="done" />Concluída</span><span><i className="paused" />Pausada</span></div>
-    </section>
-    <aside className="calendar-side" id="calendar-selected-tasks" aria-label="Atividades do dia selecionado">
-      <div className="section-heading calendar-day-heading" aria-live="polite" aria-atomic="true">
-        <div><p className="eyebrow">{selected === now.date ? 'Hoje · ' : ''}{formatDate(selected, { weekday: 'long' })}</p><h2>{formatDate(selected)}</h2></div>
-        <span className="calendar-selected-count">{selectedTasks.length} {selectedTasks.length === 1 ? 'atividade' : 'atividades'}</span>
-      </div>
-      <div className="task-list">{selectedTasks.length ? selectedTasks.map(t => <TaskCard key={t.id} task={t} />) : <Empty title={offReason(selected, state.settings) || 'Dia livre na agenda'}>Nenhuma atividade cadastrada para este dia.</Empty>}</div>
-    </aside>
-  </div>;
-}
+export function Calendar() { return <CalendarView TaskCard={TaskCard} MonthSwitcher={MonthSwitcher} />; }
