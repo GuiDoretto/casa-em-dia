@@ -27,6 +27,25 @@ function subscriptionValue(value) {
     return { endpoint: url.href, keys: { p256dh: keys.p256dh, auth: keys.auth } };
 }
 
+// Interpret provider diagnostics without storing its body, contacts or credentials.
+async function brevoFailure(response, channel) {
+    let data;
+    try { data = await response.json(); } catch { }
+    finally { try { await response.body?.cancel(); } catch { } }
+    const code = data?.code, detail = typeof data?.message === 'string' ? data.message.slice(0, 2000) : '';
+    if (response.status === 429) return 'Limite da Brevo atingido. Aguarde antes de tentar novamente.';
+    if (response.status >= 500) return 'A Brevo não confirmou o envio. Confira os registros do serviço antes de testar novamente.';
+    if (code === 'not_enough_credits') return channel === 'sms' ? 'Créditos de SMS insuficientes na Brevo. Recarregue o saldo de SMS da conta.' : 'Créditos de envio insuficientes na Brevo. Confira o limite da conta.';
+    if (code === 'account_under_validation') return 'A conta Brevo está em validação. Aguarde a liberação do envio pelo serviço.';
+    if (/unrecogni[sz]ed IP|IP address.*authori[sz]|authori[sz].*IP address/i.test(detail)) return 'A Brevo bloqueou o IP do servidor. Autorize esse IP em Segurança → IPs autorizados na Brevo.';
+    if (response.status === 401) return 'A chave de API Brevo é inválida ou foi revogada. Atualize BREVO_API_KEY no servidor.';
+    if (response.status === 403 || code === 'permission_denied') return 'A chave ou a conta Brevo não tem permissão para este envio. Confira as permissões e a ativação do canal na Brevo.';
+    if (response.status === 402) return 'A Brevo exige ativação da conta ou créditos para enviar. Confira a situação do serviço.';
+    if (response.status === 400 && /sender/i.test(detail)) return channel === 'sms' ? 'O remetente de SMS foi recusado. Confira BREVO_SMS_SENDER e a aprovação do Sender ID para o país de destino na Brevo.' : 'O remetente de e-mail foi recusado. Verifique o remetente na Brevo e confira BREVO_FROM_EMAIL.';
+    if (response.status === 400 && channel === 'sms' && /recipient|phone|mobile/i.test(detail)) return 'A Brevo recusou o telefone. Confira o número com DDD e código do país no seu perfil.';
+    return 'A Brevo rejeitou o envio. Confira a configuração e os registros do serviço.';
+}
+
 export function createNotifications({ db, settings, now = localNow, env = process.env, fetchImpl = globalThis.fetch, pushClient = webpush }) {
     const one = (sql, ...args) => db.prepare(sql).get(...args), all = (sql, ...args) => db.prepare(sql).all(...args), run = (sql, ...args) => db.prepare(sql).run(...args);
     db.exec(`CREATE TABLE IF NOT EXISTS notification_meta (key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -44,8 +63,11 @@ export function createNotifications({ db, settings, now = localNow, env = proces
         const contact = env.BREVO_FROM_EMAIL || one('SELECT email FROM users WHERE active=1 AND password_hash IS NOT NULL LIMIT 1')?.email;
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact || '') ? 'mailto:' + contact : 'mailto:notifications@example.com';
     };
-    const emailConfigured = () => !!(env.BREVO_API_KEY && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(env.BREVO_FROM_EMAIL || ''));
-    const smsConfigured = () => env.CASA_SMS_ENABLED === '1' && !!env.BREVO_API_KEY && /^[A-Za-z0-9]{3,11}$/.test(env.BREVO_SMS_SENDER || '');
+    const keyIssue = () => !env.BREVO_API_KEY ? 'Falta configurar a chave de API Brevo no servidor.' : /^cfat/i.test(env.BREVO_API_KEY) ? 'BREVO_API_KEY contém uma credencial Cloudflare. Use uma chave de API da Brevo.' : '';
+    const emailIssue = () => keyIssue() || (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(env.BREVO_FROM_EMAIL || '') ? 'Falta configurar o remetente de e-mail no servidor.' : '');
+    const smsIssue = () => env.CASA_SMS_ENABLED !== '1' ? 'O envio de SMS está desligado no servidor.' : keyIssue() || (!/^(?:[A-Za-z0-9]{3,11}|\d{12,15})$/.test(env.BREVO_SMS_SENDER || '') ? 'Configure BREVO_SMS_SENDER com o remetente aprovado na Brevo.' : '');
+    const emailConfigured = () => !emailIssue();
+    const smsConfigured = () => !smsIssue();
     const clock = () => { const value = now(); return { ...value, stamp: Number.isFinite(value.stamp) ? value.stamp : Date.now() }; };
     const preferences = userId => { const p = one('SELECT * FROM notification_preferences WHERE user_id=?', userId); return { emailEnabled: !!p?.email_enabled, smsEnabled: !!p?.sms_enabled, reminderTime: p?.reminder_time || '09:00' }; };
     const active = userId => one('SELECT * FROM users WHERE id=? AND active=1 AND password_hash IS NOT NULL', userId);
@@ -54,7 +76,7 @@ export function createNotifications({ db, settings, now = localNow, env = proces
     let stopped = false, inflight = null;
     const running = new Set();
     function status(userId) {
-        return { email: { configured: emailConfigured(), provider: 'Brevo' }, sms: { configured: smsConfigured(), provider: 'Brevo' }, push: { configured: true, publicKey: vapid.publicKey }, preferences: preferences(userId), subscriptionCount: Number(one('SELECT count(*) AS n FROM notification_subscriptions WHERE user_id=?', userId).n), recent: all('SELECT channel,status,created_at,error FROM notification_deliveries WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 12', userId).map(row => ({ channel: row.channel, status: row.status, createdAt: new Date(row.created_at).toISOString(), error: row.error })) };
+        return { email: { configured: emailConfigured(), provider: 'Brevo', issue: emailIssue() }, sms: { configured: smsConfigured(), provider: 'Brevo', issue: smsIssue() }, push: { configured: true, publicKey: vapid.publicKey }, preferences: preferences(userId), subscriptionCount: Number(one('SELECT count(*) AS n FROM notification_subscriptions WHERE user_id=?', userId).n), recent: all('SELECT channel,status,created_at,error FROM notification_deliveries WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 12', userId).map(row => ({ channel: row.channel, status: row.status, createdAt: new Date(row.created_at).toISOString(), error: row.error })) };
     }
     function savePreferences(userId, value) {
         if (!active(userId)) fail('Morador indisponível.', 403);
@@ -104,7 +126,7 @@ export function createNotifications({ db, settings, now = localNow, env = proces
         // forwarding the API key or message to another endpoint.
         try { response = await fetchImpl('https://api.brevo.com/v3/' + path, { method: 'POST', headers: { 'api-key': env.BREVO_API_KEY, 'content-type': 'application/json', 'accept': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000), redirect: 'manual' }); }
         catch { throw resultError('Não foi possível confirmar o envio com o serviço. Confira antes de testar novamente.', { uncertain: true }); }
-        if (!response.ok) { const code = Number(response.status); try { await response.body?.cancel(); } catch { } throw resultError(code === 429 ? 'Limite do serviço atingido. Aguarde antes de tentar novamente.' : 'O serviço de envio rejeitou a solicitação. Confira a configuração.', { retry: code === 429, uncertain: code >= 500 }); }
+        if (!response.ok) { const code = Number(response.status); throw resultError(await brevoFailure(response, row.channel), { retry: code === 429, uncertain: code >= 500 }); }
         try { await response.body?.cancel(); } catch { }
     }
     function eligible(row, current) {
@@ -149,7 +171,7 @@ export function createNotifications({ db, settings, now = localNow, env = proces
         if (stopped) fail('O serviço está encerrando.', 503);
         if (!['push', 'email', 'sms'].includes(channel)) fail('Canal de notificação inválido.');
         if (!active(userId)) fail('Morador indisponível.', 403);
-        if (!configured(channel)) fail('Configure este serviço no servidor antes de enviar um teste.', 503);
+        if (!configured(channel)) fail(channel === 'sms' ? smsIssue() : emailIssue(), 503);
         if (channel === 'push' && !hasSubscription(userId, endpoint)) fail('Ative as notificações neste aparelho antes de testar.', 400);
         if (channel === 'sms' && !normalizePhone(active(userId).phone)) fail('Cadastre um telefone válido com DDD.');
         const current = clock(), previous = one("SELECT created_at FROM notification_deliveries WHERE user_id=? AND channel=? AND kind='test' ORDER BY created_at DESC LIMIT 1", userId, channel);

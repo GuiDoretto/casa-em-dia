@@ -142,6 +142,48 @@ test('SMS is separate from email consent and disabled configuration, with short 
  const sms=f.calls[0];assert.equal(sms.url,'https://api.brevo.com/v3/transactionalSMS/send');assert.equal(sms.body.recipient,'+5511999991234');assert.ok(sms.body.content.length<=150);assert.match(sms.body.content,/^[\x00-\x7F]+$/);assert.doesNotMatch(sms.body.content,/cozinha|Ana/);
 });
 
+test('SMS configuration identifies missing sender and rejects a Cloudflare credential as a Brevo key',async t=>{
+ const missing=fixture(t,{environment:{BREVO_SMS_SENDER:''}});
+ assert.equal(missing.api.status('ana').sms.configured,false);
+ assert.match(missing.api.status('ana').sms.issue,/BREVO_SMS_SENDER/);
+ await assert.rejects(missing.api.sendTest('ana','sms'),/BREVO_SMS_SENDER/);
+ const wrong=fixture(t,{environment:{BREVO_API_KEY:'cfat_private-cloudflare-token'}});
+ assert.equal(wrong.api.status('ana').sms.configured,false);
+ assert.equal(wrong.api.status('ana').email.configured,false);
+ await assert.rejects(wrong.api.sendTest('ana','sms'),/credencial Cloudflare/);
+ assert.doesNotMatch(JSON.stringify(wrong.api.status('ana')),/private-cloudflare-token/);
+ assert.equal(wrong.calls.length,0);
+ const numeric=fixture(t,{environment:{BREVO_SMS_SENDER:'123456789012345'}});
+ await numeric.api.sendTest('ana','sms');
+ assert.equal(numeric.calls[0].body.sender,'123456789012345');
+});
+
+test('Brevo SMS rejections explain the required fix without exposing provider data or retrying charges',async t=>{
+ const scenarios=[
+  [400,'not_enough_credits','private-key +5511999991234',/Créditos de SMS insuficientes/],
+  [400,'account_under_validation','private-key',/em validação/],
+  [401,'unauthorized','We have detected you are using an unrecognised IP address 2001:db8::1. private-key',/bloqueou o IP/],
+  [401,'unauthorized','Key not found private-key',/chave de API Brevo é inválida/],
+  [403,'permission_denied','private-key',/não tem permissão/],
+  [400,'invalid_parameter','Sender private-key is not approved',/remetente de SMS foi recusado/],
+  [400,'invalid_parameter','Invalid recipient +5511999991234 private-key',/recusou o telefone/],
+  [402,'unknown','private-key',/ativação da conta ou créditos/],
+  [500,'unknown','private-key',/não confirmou o envio/],
+ ];
+ for(const [status,code,message,expected] of scenarios) {
+  let calls=0;
+  const f=fixture(t,{fetchImpl:async()=>{calls++;return new Response(JSON.stringify({code,message}),{status});}});
+  f.api.savePreferences('ana',prefs(false,true));
+  await f.api.tick();
+  const recent=f.api.status('ana').recent[0];
+  assert.match(recent.error,expected);
+  assert.equal(recent.status,status>=500?'uncertain':'failed');
+  assert.doesNotMatch(recent.error,/private-key|5511999991234|2001:db8/);
+  f.at('10:00');await f.api.tick();
+  assert.equal(calls,1,'Definitive or uncertain failures are not automatically charged again.');
+ }
+});
+
 test('consent is checked again for queued channels after asynchronous work',async t=>{
  let f,calls=0;f=fixture(t,{fetchImpl:async()=>{calls++;f.api.savePreferences('ana',prefs(false,false));return {ok:true,status:201};}});f.api.savePreferences('ana',prefs(true,true));
  await f.api.tick();assert.equal(calls,1);assert.equal(f.api.status('ana').recent.filter(row=>row.status==='cancelled').length,1);

@@ -131,8 +131,9 @@ function SwapDialog({ modal }) {
   const { state, now, mutate, closeModal, navigate, notify } = useHouse();
   const locked = new Set(state.swaps.filter(swap => swap.status === 'pending' && [swap.task_a, swap.task_b].every(id => swappable(state.tasks.find(task => task.id === id), now))).flatMap(swap => [swap.task_a, swap.task_b]));
   const own = state.tasks.filter(task => task.assignee_id === state.user.id && swappable(task, now) && !locked.has(task.id));
-  const [taskA, setTaskA] = useState(modal.task?.id || own[0]?.id || '');
-  const [taskB, setTaskB] = useState('');
+  const selectedOwn = modal.task?.assignee_id === state.user.id;
+  const [taskA, setTaskA] = useState(() => selectedOwn ? modal.task.id : (own.find(task => task.due_date.slice(0, 7) === modal.task?.due_date.slice(0, 7)) || own[0])?.id || '');
+  const [taskB, setTaskB] = useState(() => modal.task && !selectedOwn ? modal.task.id : '');
   const source = own.find(task => task.id === taskA);
   const options = source ? state.tasks.filter(task => task.assignee_id !== state.user.id && userFor(state, task.assignee_id).active && swappable(task, now) && !locked.has(task.id) && task.due_date.slice(0, 7) === source.due_date.slice(0, 7)) : [];
   if (!source) return <div className="stack"><Empty title="Sem atividades disponíveis para troca" description="Escolha uma atividade sua, pendente e dentro do prazo. Tarefas com pedido em andamento não podem participar de outra troca." /><button className="btn secondary" onClick={closeModal}>Entendi</button></div>;

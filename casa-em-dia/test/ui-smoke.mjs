@@ -76,6 +76,40 @@ try {
   assert.equal(await reminders.locator('input[name=notificationReminderTime]').inputValue(), '10:30');
   assert.equal(await reminders.locator('input[name=notificationPhone]').inputValue(), '(11) 99999-1234');
   await reminders.getByRole('button', { name: 'Fechar janela', exact: true }).click();
+
+  // Exercise SMS test feedback and immediate history refresh without sending SMS.
+  let smsDelivery = null;
+  const smsFailure = 'A Brevo bloqueou o IP do servidor. Autorize esse IP em Segurança → IPs autorizados na Brevo.';
+  const smsStateRoute = async route => {
+    const response = await route.fetch();
+    const data = await response.json();
+    data.notifications.sms = { configured: true, provider: 'Brevo', issue: '' };
+    data.notifications.preferences.smsEnabled = true;
+    data.notifications.recent = smsDelivery ? [smsDelivery] : [];
+    await route.fulfill({ response, json: data });
+  };
+  const smsTestRoute = async route => {
+    assert.equal(route.request().postDataJSON().channel, 'sms');
+    const failed = smsDelivery === null;
+    smsDelivery = { channel: 'sms', status: failed ? 'failed' : 'accepted', error: failed ? smsFailure : null, createdAt: new Date().toISOString() };
+    await route.fulfill({ status: failed ? 502 : 200, json: failed ? { error: smsFailure } : { ok: true, message: 'Teste aceito pelo serviço de envio.' } });
+  };
+  await page.route('**/api/state', smsStateRoute);
+  await page.route('**/api/notification-test', smsTestRoute);
+  await page.reload();
+  await page.getByRole('button', { name: /^Notificações:/ }).click();
+  reminders = page.getByRole('dialog');
+  await reminders.getByRole('button', { name: 'Enviar SMS de teste para mim', exact: true }).click();
+  await reminders.locator('.notification-delivery-history').getByText(smsFailure, { exact: true }).waitFor();
+  await reminders.locator('.notification-delivery-history').getByText('Falhou', { exact: true }).waitFor();
+  await reminders.getByRole('button', { name: 'Enviar SMS de teste para mim', exact: true }).click();
+  await reminders.locator('.notification-delivery-history').getByText('Aceito pelo serviço', { exact: true }).waitFor();
+  await reminders.getByRole('button', { name: 'Fechar janela', exact: true }).click();
+  await page.unroute('**/api/state', smsStateRoute);
+  await page.unroute('**/api/notification-test', smsTestRoute);
+  await page.reload();
+  await page.getByRole('heading', { name: 'Tudo em dia, casa leve.' }).waitFor();
+
   const iphone = await browser.newContext({
     baseURL: base, storageState: await admin.storageState(), viewport: { width: 390, height: 844 },
     isMobile: true, hasTouch: true,

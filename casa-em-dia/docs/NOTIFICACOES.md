@@ -88,10 +88,24 @@ As chaves de Web Push são geradas uma vez pelo servidor e guardadas no mesmo SQ
 
 ## Habilitar SMS opcional
 
+### Instalação na Cloudflare
+
+Em `wrangler.jsonc`, mantenha `CASA_SMS_ENABLED="1"` e `BREVO_SMS_SENDER` com o Sender ID aprovado na Brevo. A chave `BREVO_API_KEY` deve ser uma chave da **Brevo**, nunca um token Cloudflare, e fica em um secret do Worker. Para cadastrar somente essa chave a partir do `.env` local:
+
+```powershell
+npm.cmd run secrets:cloudflare -- --notifications-only --url https://casa-em-dia.casa-em-dia.workers.dev
+```
+
+Esse comando não importa dados nem altera o token de migração. Publique a versão atualizada para aplicar o remetente e o código. O cron da Cloudflare executa os lembretes com a agenda fechada; o computador local pode ficar desligado.
+
+Se a Brevo retornar **IP não reconhecido**, autorize o IP do servidor em [Segurança → IPs autorizados](https://app.brevo.com/security/authorised_ips), conforme o [guia oficial](https://developers.brevo.com/docs/ip-security). O IP de saída da Cloudflare pode ser diferente do computador e pode variar; use o IP indicado pela Brevo para o ambiente que envia. Não é necessário desativar a proteção de IP para corrigir a configuração.
+
+O aplicativo diferencia bloqueio de IP, chave inválida, permissões, falta de créditos e remetente recusado. O resultado do teste aparece imediatamente em **Meus envios recentes**, inclusive em caso de falha. "Configurado" informa que as variáveis necessárias estão presentes; somente um envio real valida a conta do provedor.
+
 **SMS não está incluído nos 300 e-mails gratuitos.** A Brevo exige créditos pré-pagos; o custo depende do país e da quantidade de segmentos da mensagem. Acentos e tamanho podem alterar o número de segmentos. Não compre créditos até conferir as condições e a disponibilidade para o Brasil na sua conta. Veja [preços e créditos de SMS](https://help.brevo.com/hc/pt/articles/208717449-Pa%C3%ADses-operacionais-e-pre%C3%A7o-para-mensagens-de-SMS).
 
 1. Confirme que sua conta pode usar SMS transacional e compre os créditos necessários.
-2. Registre/aprove o Sender ID para o país de destino quando solicitado. Novas contas criadas após **13 de março de 2026** precisam registrar esse remetente por país, segundo as [instruções oficiais](https://help.brevo.com/hc/en-us/articles/4424272648850-Send-transactional-SMS).
+2. Registre/aprove o Sender ID para o país de destino. A Brevo exige o registro por país para SMS transacional e de marketing, segundo as [instruções oficiais](https://help.brevo.com/hc/pt/articles/28255350696466-Registrar-um-ID-de-remetente-para-enviar-mensagens-SMS).
 3. Ajuste `BREVO_SMS_SENDER` para o remetente aprovado e mude `CASA_SMS_ENABLED=1` no ambiente do servidor. Reinicie/recrie o app.
 4. Cada morador informa o telefone com **DDD** e autoriza SMS no próprio perfil. Prefira o formato brasileiro completo, por exemplo `+55 11 99999-9999`. Não informe somente o número local.
 5. Faça o teste pelo próprio perfil. Um teste de SMS também consome créditos reais quando a conta está configurada.

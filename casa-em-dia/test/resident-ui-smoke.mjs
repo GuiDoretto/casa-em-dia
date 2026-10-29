@@ -95,17 +95,36 @@ try {
       const result = await post(admin, 'save-task', { title: title + ' ' + width, area: 'Sala', duration: 10, due_date: future, deadline: '23:59', assignee_id: person.user.id });
       return result.tasks.find(task => task.title === title + ' ' + width);
     }
-    const offered = await task('Oferta', requester), wanted = await task('Destino', recipient);
+    const offered = await task('Oferta', requester), wanted = await task('Destino', recipient), alternative = await task('Alternativa', outsider);
     const requesterPage = await requester.context.newPage(), recipientPage = await recipient.context.newPage();
     for (const page of [requesterPage, recipientPage]) page.on('pageerror', error => errors.push(error.message));
     await requesterPage.goto('/#swaps');
     await recipientPage.goto('/');
     await recipientPage.getByRole('heading', { name: 'Tudo em dia, casa leve.' }).waitFor();
     await requesterPage.getByRole('button', { name: 'Pedir troca', exact: true }).click();
-    const swapDialog = requesterPage.getByRole('dialog');
+    let swapDialog = requesterPage.getByRole('dialog');
     await swapDialog.locator('select[name=taskA]').selectOption(offered.id);
     assert.equal(await swapDialog.getByRole('button', { name: 'Enviar pedido', exact: true }).isDisabled(), true);
     await swapDialog.locator('select[name=taskB]').selectOption(wanted.id);
+    assert.ok(await swapDialog.locator('select[name=taskB] option').evaluateAll((options, id) => options.some(option => option.value === id), alternative.id));
+    await swapDialog.getByRole('button', { name: 'Cancelar', exact: true }).click();
+    await requesterPage.getByRole('button', { name: 'Agenda', exact: true }).click();
+    await requesterPage.locator('.agenda[data-ready=true]').waitFor();
+    if (future.slice(0, 7) !== localNow().date.slice(0, 7)) await requesterPage.getByRole('button', { name: 'Próximo mês', exact: true }).click();
+    const taskDay = requesterPage.locator('.agenda-stream-day[data-date="' + future + '"]');
+    await taskDay.getByRole('button', { name: 'Pedir troca de ' + offered.title, exact: true }).click();
+    swapDialog = requesterPage.getByRole('dialog');
+    assert.equal(await swapDialog.locator('select[name=taskA]').inputValue(), offered.id);
+    assert.equal(await swapDialog.locator('select[name=taskB]').inputValue(), '');
+    await swapDialog.getByRole('button', { name: 'Cancelar', exact: true }).click();
+    for (const target of [alternative, wanted]) {
+      await taskDay.getByRole('button', { name: 'Pedir troca de ' + target.title, exact: true }).click();
+      swapDialog = requesterPage.getByRole('dialog');
+      assert.equal(await swapDialog.locator('select[name=taskA]').inputValue(), offered.id);
+      assert.equal(await swapDialog.locator('select[name=taskB]').inputValue(), target.id);
+      assert.equal(await swapDialog.getByRole('button', { name: 'Enviar pedido', exact: true }).isEnabled(), true);
+      if (target === alternative) await swapDialog.getByRole('button', { name: 'Cancelar', exact: true }).click();
+    }
     assert.equal(await requesterPage.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'Diálogo de troca em ' + width);
     const [swapResponse] = await Promise.all([
       requesterPage.waitForResponse(response => response.url().endsWith('/api/swap') && response.request().method() === 'POST'),
@@ -144,6 +163,7 @@ try {
   assert.deepEqual(errors, [], 'Erros JavaScript no navegador');
   console.log('OK: cadastro com admin desmarcado, promoção e edição em 1440 e 390px.');
   console.log('OK: pedido real, sino do destinatário, autorização e aceite com troca dos responsáveis em desktop/mobile.');
+  console.log('OK: ícone nas atividades de todos os moradores e seleção correta da atividade própria ou solicitada.');
   console.log('OK: sem rolagem horizontal ou erros JavaScript. Capturas em work/resident-ui-check/.');
 } finally {
   await browser?.close();

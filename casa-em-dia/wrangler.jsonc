@@ -30,13 +30,13 @@
     }
   ],
   "vars": {
-    "BREVO_API_KEY": "cfat\\_Ah2JzLXsUzxEALVhQbatpHZbnbICoIx16EQbThPP763908b0",
     "BREVO_FROM_EMAIL": "guii.doreto@gmail.com",
     "BREVO_FROM_NAME": "Casa em Dia",
     "CASA_MIGRATION_ENABLED": "0",
     "CASA_PUBLIC_URL": "https://casa-em-dia.casa-em-dia.workers.dev/",
     "CASA_SCHEDULE_ENABLED": "1",
-    "CASA_SMS_ENABLED": "1"
+    "CASA_SMS_ENABLED": "1",
+    "BREVO_SMS_SENDER": "CasaEmDia"
   },
   "triggers": {
     "crons": [

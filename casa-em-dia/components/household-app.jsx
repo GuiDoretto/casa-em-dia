@@ -249,6 +249,7 @@ export default function HouseholdApp() {
   async function testNotifications(channel) {
     if (busyRef.current || pushBusyRef.current) return;
     pushBusyRef.current = true; setPushBusy(true);
+    const userId = state.user.id;
     try {
       const data = { channel };
       if (channel === 'push') {
@@ -262,7 +263,13 @@ export default function HouseholdApp() {
       notify(result.message || 'O teste foi aceito pelo serviço. Aguarde a entrega.');
       return result;
     } catch (error) { notify(error.message); return null; }
-    finally { pushBusyRef.current = false; setPushBusy(false); }
+    finally {
+      try {
+        const fresh = await api('state');
+        setState(current => current?.user.id === userId ? { ...current, notifications: fresh.notifications } : current);
+      } catch { }
+      pushBusyRef.current = false; setPushBusy(false);
+    }
   }
   async function logout() {
     if (busyRef.current || pushBusyRef.current) return;

@@ -18,7 +18,8 @@ export function NotificationServerStatus() {
   return <section className="panel admin-section notification-server-status">
     <div className="row"><Icon name="bell" size={21} /><h2>Envio de lembretes</h2></div>
     <p className="hint">Cada morador escolhe os canais no próprio perfil ou no sino. O servidor precisa permanecer ligado para enviar os avisos.</p>
-    <dl>{[['email', 'E-mail'], ['sms', 'SMS'], ['push', 'Avisos no aparelho']].map(([channel, label]) => <div key={channel}><dt>{label}</dt><dd className={notifications[channel]?.configured ? 'notification-ready' : ''}>{notifications[channel]?.configured ? 'Disponível' : 'Configuração pendente'}</dd></div>)}</dl>
+    <dl>{[['email', 'E-mail'], ['sms', 'SMS'], ['push', 'Avisos no aparelho']].map(([channel, label]) => <div key={channel}><dt>{label}</dt><dd className={notifications[channel]?.configured ? 'notification-ready' : ''}>{notifications[channel]?.configured ? 'Configurado' : 'Configuração pendente'}</dd></div>)}</dl>
+    {['email', 'sms'].filter(channel => notifications[channel]?.issue).map(channel => <p className="hint" key={channel}>{channelNames[channel]}: {notifications[channel].issue}</p>)}
     <p className="hint">E-mail e SMS dependem de uma conta de envio configurada no servidor. SMS utiliza créditos pagos do provedor. No iPhone, os avisos exigem HTTPS e o app adicionado à Tela de Início.</p>
   </section>;
 }
@@ -56,12 +57,12 @@ export default function NotificationSettings() {
     <form className="notification-preferences-form" onSubmit={save}>
       <div className="notification-channel">
         <label className="check-row"><span><strong><Icon name="mail" size={16} />Receber resumo por e-mail</strong><small>{state.user.email}</small></span><input type="checkbox" name="notificationEmailEnabled" checked={emailEnabled} onChange={event => setEmailEnabled(event.target.checked)} disabled={busy || (!emailConfigured && !emailEnabled)} /></label>
-        {!emailConfigured && <p className="notification-channel-note">Configuração pendente no servidor.</p>}
+        {!emailConfigured && <p className="notification-channel-note">{notifications.email?.issue || 'Configuração pendente no servidor.'}</p>}
         <button type="button" className="btn secondary compact" disabled={busy || !emailConfigured || !preferences.emailEnabled || !state.user.email || dirty} onClick={() => testNotifications('email')}>Enviar e-mail de teste para mim</button>
       </div>
       <div className="notification-channel">
         <label className="check-row"><span><strong><Icon name="phone" size={16} />Receber resumo por SMS</strong><small>Use seu próprio número para receber o lembrete diário.</small></span><input type="checkbox" name="notificationSmsEnabled" checked={smsEnabled} onChange={event => setSmsEnabled(event.target.checked)} disabled={busy || (!smsConfigured && !smsEnabled)} /></label>
-        {!smsConfigured && <p className="notification-channel-note">Configuração pendente no servidor.</p>}
+        {!smsConfigured && <p className="notification-channel-note">{notifications.sms?.issue || 'Configuração pendente no servidor.'}</p>}
         <p className="notification-channel-note">SMS utiliza créditos pagos do provedor de envio.</p>
         <label className="field"><span>Meu telefone</span><input name="notificationPhone" type="tel" autoComplete="tel" maxLength={30} placeholder="+55 11 99999-9999" value={phone} onChange={event => setPhone(event.target.value)} disabled={busy} /><small className="hint">Inclua o DDD. Para números brasileiros, use +55 antes do DDD.</small></label>
         <button type="button" className="btn secondary compact" disabled={busy || !smsConfigured || !preferences.smsEnabled || !state.user.phone || dirty} onClick={() => testNotifications('sms')}>Enviar SMS de teste para mim</button>
