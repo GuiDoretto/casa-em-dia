@@ -65,7 +65,7 @@ export function Calendar() {
           </select>
         </div>
       </div>
-      <p className="calendar-mobile-hint"><Icon name="calendar" size={14} />Toque no dia para ver as atividades</p>
+      <p className="calendar-mobile-hint"><Icon name="calendar" size={14} />Atividades e responsáveis · toque no dia para ver detalhes</p>
       <div className="calendar-grid" role="group" aria-label={'Calendário de ' + monthLabel(month)}>
         {['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'].map(d => <div className="calendar-weekday" key={d}>{d}</div>)}
         {Array.from({ length: rows * 7 }, (_, i) => addDay(start, i)).map(day => {
@@ -75,6 +75,17 @@ export function Calendar() {
             aria-pressed={day === selected} aria-current={day === now.date ? 'date' : undefined}
             aria-controls="calendar-selected-tasks"
             aria-label={formatDate(day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + ', ' + dayTasks.length + (dayTasks.length === 1 ? ' atividade' : ' atividades') + (reason ? ', ' + reason : '')}>
+            <span className="calendar-mobile-date" aria-hidden="true"><strong>{Number(day.slice(8))}</strong><small>{formatDate(day, { weekday: 'short' })}</small>{day === now.date && <small>Hoje</small>}</span>
+            <span className="calendar-mobile-tasks">
+              {dayTasks.length ? dayTasks.map(task => {
+                const ownerIndex = state.users.findIndex(user => user.id === task.assignee_id);
+                const owner = state.users[ownerIndex];
+                return <span key={task.id} className={'calendar-mobile-task ' + task.status}>
+                  <Avatar user={owner || { name: 'Sem responsável' }} index={ownerIndex} />
+                  <span className="calendar-mobile-task-copy"><strong>{task.title}</strong><span>{owner?.name || 'Sem responsável'}</span><small>{task.status === 'done' ? 'Concluída' : task.status === 'paused' ? 'Pausada' : 'Pendente'}</small></span>
+                </span>;
+              }) : <span className="calendar-mobile-empty">{reason || 'Dia livre'}</span>}
+            </span>
             <span className="calendar-number">{Number(day.slice(8))}</span>
             <span className="calendar-day-summary" aria-hidden="true">
               {dayTasks.length > 0 ? <><span className="calendar-task-count">{dayTasks.length}</span><span className="calendar-status-dots">{['pending', 'done', 'paused'].filter(status => dayTasks.some(task => task.status === status)).map(status => <i key={status} className={status} />)}</span></> : reason ? <Icon name="leaf" size={12} /> : null}
